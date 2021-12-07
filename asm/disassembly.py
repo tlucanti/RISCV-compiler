@@ -2,7 +2,7 @@
 # @Author: kostya
 # @Date:   2021-12-04 21:23:40
 # @Last Modified by:   kostya
-# @Last Modified time: 2021-12-05 19:00:02
+# @Last Modified time: 2021-12-07 14:30:50
 
 import sys
 
@@ -60,11 +60,11 @@ class Instruction(object):
 		ADDI_OPCODE, XORI_OPCODE, ORI_OPCODE, \
 		ANDI_OPCODE, SLTI_OPCODE, SLTIU_OPCODE, \
 		LB_OPCODE, LH_OPCODE, LW_OPCODE, \
-		LBU_OPCODE, LHU_OPCODE, JALR_OPCODE \
+		LBU_OPCODE, LHU_OPCODE, JALR_OPCODE, \
+		FENCE_OPCODE, ECALL_OPCODE, EBREAK_OPCODE \
 	}
 	S_OPCODE = {
 		SB_OPCODE, SH_OPCODE, SW_OPCODE, \
-		ECALL_OPCODE, EBREAK_OPCODE \
 	}
 	B_OPCODE = {
 		BEQ_OPCODE, BNE_OPCODE, BLT_OPCODE, \
@@ -92,6 +92,7 @@ class Instruction(object):
 		elif self.opcode in Instruction.U_OPCODE:
 			self.type = 'U'
 		else:
+			self.instruction = 'ILLINSTR'
 			self.type = 'None'
 			ans = 'opcode: {op:02x} = {op:07b} = {op}\n'.format(op=self.opcode)
 			print(ans)
@@ -202,7 +203,7 @@ class Instruction(object):
 					self.instruction = 'INVALID SRLI/SRAI INSTRUCTION (funct7)'
 			else:
 				self.instruction = 'INVALID IMMIDIATE INSTRUCTION (funct3)'
-		elif self.opcode == Instruction.ADD:
+		elif self.opcode == Instruction.ADD_OPCODE:
 			if self.funct3 == 0b000:
 				if self.funct7 == 0:
 					self.instruction = 'ADD'
@@ -257,24 +258,26 @@ class Instruction(object):
 					self.instruction = 'AND'
 				else:
 					self.instruction = 'INVALID AND INSTRUCTION (funct7)'
-			elif self.opcode == self.FENCE_OPCODE:
-				if self.funct3 == 0:
-					self.instruction = 'FENCE'
-				else:
-					self.instruction = 'INVALID FENCE INSTRUCTION (funct3)'
-			elif self.opcode == Instruction.ECALL_OPCODE:
-				if self.funct3 != 0:
-					self.instruction = 'INVALID ECALL/EBREAK INSTRUCTION (funct3)'
-				elif self.funct7 != 0:
-					self.instruction = 'INVALID ECALL/EBREAK INSTRUCTION (funct7)'
-				elif self.imm == 0:
-					self.instruction = 'ECALL'
-				elif self.imm == 1:
-					self.instruction = 'EBREAK'
-				else:
-					self.instruction = 'INVALID ECALL/EBREAK INSTRUCTION (imm)'
 			else:
-				self.instruction = 'INVALID INSTRUCTION (opcode)'
+				self.instruction = 'INVALID ARITHMETIC INSTRUCTION (funct3)'
+		elif self.opcode == self.FENCE_OPCODE:
+			if self.funct3 == 0:
+				self.instruction = 'FENCE'
+			else:
+				self.instruction = 'INVALID FENCE INSTRUCTION (funct3)'
+		elif self.opcode == Instruction.ECALL_OPCODE:
+			if self.funct3 != 0:
+				self.instruction = 'INVALID ECALL/EBREAK INSTRUCTION (funct3)'
+			elif self.funct7 != 0:
+				self.instruction = 'INVALID ECALL/EBREAK INSTRUCTION (funct7)'
+			elif self.imm == 0:
+				self.instruction = 'ECALL'
+			elif self.imm == 1:
+				self.instruction = 'EBREAK'
+			else:
+				self.instruction = 'INVALID ECALL/EBREAK INSTRUCTION (imm)'
+		else:
+			self.instruction = 'INVALID INSTRUCTION (opcode)'
 
 	def __str__(self):
 		ans = 'class {} instruction: {}\n'.format(self.type, self.instruction)
