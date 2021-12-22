@@ -20,5 +20,5 @@ add		x1		x1		x1		# 13 # x1 = x1 + x1 (x1 = 2)
 add		x1		x1		x1		# 14 # x1 = x1 + x1 (x1 = 4)
 add		x1		x1		x1		# 15 # x1 = x1 + x1 (x1 = 8)
 add		x1		x1		x1		# 16 # x1 = x1 + x1 (x1 = 16)
-
-j		0						# 17 # end (infinit loop)
+end:
+j		end						# 17 # end (infinit loop)
