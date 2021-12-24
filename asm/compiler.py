@@ -24,7 +24,7 @@ class Color():
 
 # ----------------------------- EXCEPTIONS CLASSES -----------------------------
 class RISCvSyntaxError(SyntaxError):
-	def __init__(self, what, error_index):
+	def __init__(self, what):
 		super().__init__(what)
 		self.name = 'Syntax error'
 		self.what = what
@@ -32,18 +32,25 @@ class RISCvSyntaxError(SyntaxError):
 
 
 class ImmidiateError(RISCvSyntaxError):
-	def __init__(self, what, error_index):
-		super().__init__(what, error_index)
+	def __init__(self, what):
+		super().__init__(what)
 		self.name = 'Immidiate value error'
 
 
 class RegisterError(RISCvSyntaxError):
-	def __init__(self, what, error_index):
-		super().__init__(what, error_index)
+	def __init__(self, what):
+		super().__init__(what)
 		self.name = 'Register name error'
+
+
+class LabelError(RISCvSyntaxError):
+	def __init__(self, what, error_index):
+		super().__init__(what)
+		self.name = 'Invalid label name'
+
 		
 # ------------------------------ SUPPORT CLASSES -------------------------------
-class _ALU():
+class ALU():
 	ALU_ADD = 0b0000
 	ALU_SUB = 0b0001
 	ALU_XOR = 0b0010
@@ -62,48 +69,48 @@ class _ALU():
 
 class Immidiate():
 
-		IMMIDIATE_ERROR_MESSAGE = '{YELLOW}Invalid Immidiate value with base ' \
-			'{PURPLE}{__base__}: {CYAN}`{__value__}`{RESET}'
-		IMMIDIATE_LIMIT_MESSAGE = '{YELLOW}Immidiate value to big: ' \
-			'{CYAN}`{__value__}`{YELLOW}, limit is {PURPLE}' \
-			+ f'[{-IMMIDIATE_LIMIT - 1} : {IMMIDIATE_LIMIT}]' + '{RESET}'
-		IMMIDIATE_ERROR_BASE = '{YELLOW}Invalid Immidiate value: ' \
-			'{CYAN}`{__value__}`{RESET}'
+	IMMIDIATE_ERROR_MESSAGE = '{YELLOW}Invalid Immidiate value with base ' \
+		'{PURPLE}{__base__}: {CYAN}`{__value__}`{RESET}'
+	IMMIDIATE_LIMIT_MESSAGE = '{YELLOW}Immidiate value to big: ' \
+		'{CYAN}`{__value__}`{YELLOW}, limit is {PURPLE}' \
+		+ f'[{-IMMIDIATE_LIMIT - 1} : {IMMIDIATE_LIMIT}]' + '{RESET}'
+	IMMIDIATE_ERROR_BASE = '{YELLOW}Invalid Immidiate value: ' \
+		'{CYAN}`{__value__}`{RESET}'
 
+	def __new__(self, imm, type):
 		sign = 1
 		if st[0] == '-':
 			sign = -1
 			st = st[1:]
 		if st[0] == '+':
 			st = st[1:]
-		match st[0:2]:
-			case '0x' | '0X':
-				i = st[2:]
-				base = 16
-				if not contains_only(i, '0123456789abcdefABCDEF'):
-					raise ImmidiateError(IMMIDIATE_ERROR_MESSAGE.replace( \
-						'{__base__}', '16').replace( \
-						'{__value__}', i), \
-						(error_index, error_index))
-			case '0o' | '0O':
-				i = st[2:]
-				base = 8
-				if not contains_only(i, '01234567'):
-					raise ImmidiateError(IMMIDIATE_ERROR_MESSAGE.replace( \
-					   '{__base__}', '8').replace( \
-					   '{__value__}', i), \
-						(error_index, error_index))
-			case '0b' | '0B':
-				i = st[2:]
-				base = 2
-				if not contains_only(i, '01'):
-					raise ImmidiateError(IMMIDIATE_ERROR_MESSAGE.replace( \
-					   '{__base__}', '2').replace( \
-					   '{__value__}', i), \
-						(error_index, error_index))
-			case _:
-				i = st
-				base = 10
+		if st[0:2] in ('0x', '0X'):
+			i = st[2:]
+			base = 16
+			if not contains_only(i, '0123456789abcdefABCDEF'):
+				raise ImmidiateError(IMMIDIATE_ERROR_MESSAGE.replace( \
+					'{__base__}', '16').replace( \
+					'{__value__}', i), \
+					(error_index, error_index))
+		elif st[0:2] in ('0o', '0O')
+			i = st[2:]
+			base = 8
+			if not contains_only(i, '01234567'):
+				raise ImmidiateError(IMMIDIATE_ERROR_MESSAGE.replace( \
+					'{__base__}', '8').replace( \
+					'{__value__}', i), \
+					(error_index, error_index))
+		elif st[0:2] in ('0b', '0B')
+			i = st[2:]
+			base = 2
+			if not contains_only(i, '01'):
+				raise ImmidiateError(IMMIDIATE_ERROR_MESSAGE.replace( \
+					'{__base__}', '2').replace( \
+					'{__value__}', i), \
+					(error_index, error_index))
+		else:
+			i = st
+			base = 10
 		try:
 			ans = int(i, base=base) * sign
 			if not -IMMIDIATE_LIMIT - 1 <= ans <= IMMIDIATE_LIMIT:
@@ -114,7 +121,7 @@ class Immidiate():
 			raise ImmidiateError(IMMIDIATE_ERROR_BASE.replace('{__value__}', i),
 				(error_index, error_index))
 
-	def __init__(self, imm, size):
+	def __init__(self, imm, type):
 		self.imm = imm
 		self.imm_str = '{imm:0{size}b}'.format(size=size, imm=imm)
 
@@ -138,25 +145,24 @@ class Register():
 
 		if not contains_only(st.lower(), '0123456789rasgfptxzeo'):
 			raise RegisterError(REGISTER_FORMAT_MESSAGE.replace('{__reg__}',st))
+		stl = st.lower()
 		match st.lower():
-			case 'zero':
-				return Register('x0')
-			case 'ra':
-				return Register('x1')
-			case 'sp':
-				return Register('x2')
-			case 'gp':
-				return Register('x3')
-			case 'tp':
-				return Register('x4')
-			case 't0' | 't1' | 't2' as T:
-				return Register('x' + str(int(T[1]) + 5))
-			case 's0' | 'fp':
-				return Register('x8')
-			case 's1':
-				return Register('x9')
-			case _:
-				pass
+		if stl == 'zero':
+			return Register('x0')
+		elif stl == 'ra':
+			return Register('x1')
+		elif stl == 'sp'
+			return Register('x2')
+		elif stl == 'gp':
+			return Register('x3')
+		elif stl == 'tp':
+			return Register('x4')
+		elif stl in ('t0', 't1', 't2'):
+			return Register('x' + str(int(stl[1]) + 5))
+		elif stl in ('s0', 'fp')
+			return Register('x8')
+		elif stl == 's1':
+			return Register('x9')
 
 		if st.startswith(('a', 't', 'x')) and st[1].isdigit():
 			try:
@@ -284,152 +290,197 @@ class Instruction():
 				+ '`{RESET}', (0, 0))
 		return instr
 
-		def Rtype(self, line):
+	def check_args(self, line, format):
+		for i in range(len(format)):
+			if i >= len(line):
+				if format[i] == 'imm':
+					raise RISCvSyntaxError('expected immidiate value')
+				elif format[i] == 'reg':
+					raise RISCvSyntaxError('expected register')
+				elif format[i] == 'label':
+					raise RISCvSyntaxError('expected label')
+				else:
+					raise SyntaxError(
+						f'unexpected format cheker value: `{format[i]}`')
+			elif format[i] == 'imm':
+				continue
+			elif format[i] == 'reg':
+				continue
+			elif format[i] == 'label':
+				if format[i] in self.labels:
+					return self.labels[format[i]]
+				else:
 
-			op_ht = {
-				'slli': Op_ht(funct7=0b0000000, funct3=0b001, opcode=0b0010011),
-				'srli': Op_ht(funct7=0b0000000, funct3=0b101, opcode=0b0010011),
-				'srai': Op_ht(funct7=0b0100000, funct3=0b101, opcode=0b0010011),
-				'add' : Op_ht(funct7=0b0000000, funct3=0b000, opcode=0b0110011),
-				'sub' : Op_ht(funct7=0b0100000, funct3=0b000, opcode=0b0110011),
-				'sll' : Op_ht(funct7=0b0000000, funct3=0b001, opcode=0b0110011),
-				'slt' : Op_ht(funct7=0b0000000, funct3=0b010, opcode=0b0110011),
-				'sltu': Op_ht(funct7=0b0000000, funct3=0b011, opcode=0b0110011),
-				'xor' : Op_ht(funct7=0b0000000, funct3=0b100, opcode=0b0110011),
-				'srl' : Op_ht(funct7=0b0000000, funct3=0b101, opcode=0b0110011),
-				'sra' : Op_ht(funct7=0b0100000, funct3=0b101, opcode=0b0110011),
-				'or'  : Op_ht(funct7=0b0000000, funct3=0b110, opcode=0b0110011),
-				'and' : Op_ht(funct7=0b0000000, funct3=0b111, opcode=0b0110011),
-			}
 
-			self.check_args(line, ('op', 'reg', 'reg', ('reg', 'imm')))
 
-			op = line[0]
-			funct7 = op_ht[op].funct7
-			if op in ('slli', 'srli', 'srai'):
-				rs2 = Immidiate(line[3], 5)
-			else:
-				rs2 = Register(line[3])
+	def Rtype(self, line):
 
-			rs1 = Register(line[2])
-			funct3 = op_ht[op].funct3
-			rd = Register(line[1])
-			opcode = op_ht[op].opcode
+		op_ht = {
+			'slli': Op_ht(funct7=0b0000000, funct3=0b001, opcode=0b0010011),
+			'srli': Op_ht(funct7=0b0000000, funct3=0b101, opcode=0b0010011),
+			'srai': Op_ht(funct7=0b0100000, funct3=0b101, opcode=0b0010011),
+			'add' : Op_ht(funct7=0b0000000, funct3=0b000, opcode=0b0110011),
+			'sub' : Op_ht(funct7=0b0100000, funct3=0b000, opcode=0b0110011),
+			'sll' : Op_ht(funct7=0b0000000, funct3=0b001, opcode=0b0110011),
+			'slt' : Op_ht(funct7=0b0000000, funct3=0b010, opcode=0b0110011),
+			'sltu': Op_ht(funct7=0b0000000, funct3=0b011, opcode=0b0110011),
+			'xor' : Op_ht(funct7=0b0000000, funct3=0b100, opcode=0b0110011),
+			'srl' : Op_ht(funct7=0b0000000, funct3=0b101, opcode=0b0110011),
+			'sra' : Op_ht(funct7=0b0100000, funct3=0b101, opcode=0b0110011),
+			'or'  : Op_ht(funct7=0b0000000, funct3=0b110, opcode=0b0110011),
+			'and' : Op_ht(funct7=0b0000000, funct3=0b111, opcode=0b0110011),
+		}
 
-			instr_bin = '{funct7}{rs2}{rs1}{funct3}{rd}{opcode}'.format(
-				funct7=funct7, \
+		self.check_args(line, ('op', 'reg', 'reg', ('reg', 'imm')))
+
+		op = line[0]
+		funct7 = op_ht[op].funct7
+		if op in ('slli', 'srli', 'srai'):
+			rs2 = Immidiate(line[3], 'R')
+		else:
+			rs2 = Register(line[3])
+
+		rs1 = Register(line[2])
+		funct3 = op_ht[op].funct3
+		rd = Register(line[1])
+		opcode = op_ht[op].opcode
+
+		instr_bin = '{funct7}{rs2}{rs1}{funct3}{rd}{opcode}'.format(
+			funct7=funct7, \
+			rs2=rs2, \
+			rs1=rs1, \
+			funct3=funct3, \
+			opcode=opcode
+		)
+		return [instr]
+
+	def Itype(self, line):
+
+		op_ht = {
+			'lb'	: Op_ht(funct3=0b000, opcode=0b0000011),
+			'lh'	: Op_ht(funct3=0b001, opcode=0b0000011),
+			'lw'	: Op_ht(funct3=0b010, opcode=0b0000011),
+			'lbu'	: Op_ht(funct3=0b100, opcode=0b0000011),
+			'lhu'	: Op_ht(funct3=0b101, opcode=0b0000011),
+			'addi'	: Op_ht(funct3=0b000, opcode=0b0010011),
+			'slti'	: Op_ht(funct3=0b010, opcode=0b0010011),
+			'sltiu'	: Op_ht(funct3=0b011, opcode=0b0010011),
+			'xori'	: Op_ht(funct3=0b100, opcode=0b0010011),
+			'ori'	: Op_ht(funct3=0b110, opcode=0b0010011),
+			'andi'	: Op_ht(funct3=0b111, opcode=0b0010011)
+		}
+
+		self.check_args(line, ('op', 'reg', 'reg', 'imm'))
+
+		op = line[0]
+		imm = Immidiate(line[3], 'I')
+		rs1 = Register(line[2])
+		funct3 = op_ht[op].funct3
+		rd = Register(line[1])
+		opcode = op_ht[op].opcode
+
+		instr_bin = '{imm}{rs1}{funct3}{rd}{opcode}'.format(
+			imm=imm, \
+			rs1=rs1, \
+			funct3=funct3, \
+			rd=rd, \
+			opcode=opcode
+		)
+		return [instr]
+
+	def Stype(self, line):
+
+		op_ht = {
+			'sb'	: Op_ht(funct3=0b000, opcode=0b0100011),
+			'sh'	: Op_ht(funct3=0b001, opcode=0b0100011),
+			'sw'	: Op_ht(funct3=0b010, opcode=0b0100011)
+		}
+
+		self.check_args(line, ('reg', 'offset'))
+
+		imm, rs1 = self.parse_offset(line[2])
+		imm = parse_imm(imm, 7)
+		rs2 = Register(line[1])
+		rs1 = Register(rs1)
+		funct3 = op_ht[op].funct3
+		opcode = op_ht[op].opcode
+
+		instr_bin = '{imm_11_5}{rs2}{rs1}{funct3}{imm_4_0}{opcode}'.format(
+				imm_11_5=imm[11:5], \
 				rs2=rs2, \
 				rs1=rs1, \
 				funct3=funct3, \
-				opcode=opcode
+				imm_4_0=imm[4:0], \
+				opcode=opcode \
 			)
-			return [instr]
 
-		def Itype(self, line):
+		return [instr_bin]
 
-			op_ht = {
-				'lb'	: Op_ht(funct3=0b000, opcode=0b0000011),
-				'lh'	: Op_ht(funct3=0b001, opcode=0b0000011),
-				'lw'	: Op_ht(funct3=0b010, opcode=0b0000011),
-				'lbu'	: Op_ht(funct3=0b100, opcode=0b0000011),
-				'lhu'	: Op_ht(funct3=0b101, opcode=0b0000011),
-				'addi'	: Op_ht(funct3=0b000, opcode=0b0010011),
-				'slti'	: Op_ht(funct3=0b010, opcode=0b0010011),
-				'sltiu'	: Op_ht(funct3=0b011, opcode=0b0010011),
-				'xori'	: Op_ht(funct3=0b100, opcode=0b0010011),
-				'ori'	: Op_ht(funct3=0b110, opcode=0b0010011),
-				'andi'	: Op_ht(funct3=0b111, opcode=0b0010011)
-			}
+	def Btype(self, line):
 
-			self.check_args(line, ('op', 'reg', 'reg', 'imm'))
+		op_ht = {
+			'beq'	: Op_ht(funct3=0b000, opcode=0b1100011),
+			'bne'	: Op_ht(funct3=0b001, opcode=0b1100011),
+			'blt'	: Op_ht(funct3=0b100, opcode=0b1100011),
+			'bge'	: Op_ht(funct3=0b101, opcode=0b1100011),
+			'bltu'	: Op_ht(funct3=0b110, opcode=0b1100011),
+			'bgeu'	: Op_ht(funct3=0b111, opcode=0b1100011)
+		}
 
-			op = line[0]
-			imm = Immidiate(line[3], 11)
-			rs1 = Register(line[2])
-			funct3 = op_ht[op].funct3
-			rd = Register(line[1])
-			opcode = op_ht[op].opcode
+		imm = self.check_args(line, ('reg', 'reg', 'label', 'imm'))
 
-			instr_bin = '{imm}{rs1}{funct3}{rd}{opcode}'.format(
-				imm=imm, \
+		imm = Immidiate(imm, 'B')
+		rs2 = Register(line[2])
+		rs1 = Register(line[1])
+		funct3 = op_ht[op].funct3
+		opcode = op_ht[op].opcode
+
+		instr_bin = \
+			'{imm_12}{imm_10_5}{rs2}{rs1}{funct3}{imm_4_1}{imm_11}'.format(
+				imm_12=imm[12], \
+				imm_10_5=imm[10:5], \
+				rs2=rs2, \
 				rs1=rs1, \
 				funct3=funct3, \
-				rd=rd, \
-				opcode=opcode
+				imm_4_1=imm[4:1], \
+				imm_11=imm[11]
 			)
-			return [instr]
 
-		def Stype(self, line):
+		return [instr_bin]
 
-			op_ht = {
-				'sb'	: Op_ht(funct3=0b000, opcode=0b0100011),
-				'sh'	: Op_ht(funct3=0b001, opcode=0b0100011),
-				'sw'	: Op_ht(funct3=0b010, opcode=0b0100011)
-			}
+	def Utype(self, line):
 
-			self.check_args(line, ('reg', 'offset'))
+		op_ht = {
+			'lui'	: Op_ht(opcode=0b0110111),
+			'auipc'	: Op_ht(opcode=0b0010111)
+		}
 
-			imm, rs1 = self.parse_offset(line[2])
-			imm = parse_imm(imm, 7)
-			rs2 = Register(line[1])
-			rs1 = Register(rs1)
-			funct3 = op_ht[op].funct3
-			opcode = op_ht[op].opcode
+		self.check_args(line, ('reg', 'imm'))
 
-			instr_bin = '{imm_11_5:07b}{rs2:05b}{rs1:05b}{funct3:03b}' \
-				'{imm_4_0:05b}{opcode:07b}'.format(
-					imm_11_5=imm[11:5], \
-					rs2=rs2, \
-					rs1=rs1, \
-					funct3=funct3, \
-					imm_4_0=imm[4:0], \
-					opcode=opcode \
-				)
+		reg = Register(line[1])
+		imm = Immidiate(line[2], 'U')
+		opcode = op_ht[op].opcode
+		
+	def Jtype(self, line):
 
-			return [instr_bin]
+		op_ht = {
+			'jal'	: Op_ht(opcode=0b1101111)	
+		}
 
-		def Btype(self, line):
+		imm = self.check_args(line, ('reg', 'label'))
 
-			op_ht = {
-				'beq'	: Op_ht(funct3=0b000, opcode=1100011),
-				'bne'	: Op_ht(funct3=0b001, opcode=1100011),
-				'blt'	: Op_ht(funct3=0b100, opcode=1100011),
-				'bge'	: Op_ht(funct3=0b101, opcode=1100011),
-				'bltu'	: Op_ht(funct3=0b110, opcode=1100011),
-				'bgeu'	: Op_ht(funct3=0b111, opcode=1100011)
-			}
+		imm = Immidiate(line[2], 'J')
+		reg = Register(line[1])
+		opcode = op_ht[op].opcode
 
-			imm = self.check_args(line, ('reg', 'reg', ('label', 'imm')))
+		instr_bin = '{imm_20}{imm_10_1}{imm_11}{imm_19_12}{rd}{opcode}'.format(
+			imm_20=imm[20],
+			imm_10_1=imm[10:1],
+			imm_19_12=imm[19:12],
+			opcode=opcode
+		)
 
-			imm = Immidiate(imm, 12)
-			rs2 = Register(line[2])
-			rs1 = Register(line[1])
-			funct3 = op_ht[op].funct3
-			opcode = op_ht[op].opcode
+		return [instr_bin]
 
-			instr_bin = '{imm_12:01b}{imm_10_5:06b}{rs2:05b}{rs1:05b}' \
-				'{funct3:03b}{imm_4_1:04b}{imm_11:01b}'.format(
-					imm_12=imm[12], \
-					imm_10_5=imm[10:5], \
-					rs2=rs2, \
-					rs1=rs1, \
-					funct3=funct3, \
-					imm_4_1=imm[4:1], \
-					imm_11=imm[11]
-				)
-
-			return [instr_bin]
-
-		def Utype(self, line):
-
-			op_ht = {
-				'lui'	: Op_ht(opcode=0b0110111),
-				'auipc'	: Op_ht(opcode=0b0010111)
-			}
-
-			self.check_args(line, ('reg', 'imm'))
-
-			reg = Register(line[1])
-			imm = Immidiate(line[2], 32)
-			
-
+	def PseudoType(self, line):
+		return None
