@@ -2,7 +2,7 @@
 # @Author: kostya
 # @Date:   2021-12-04 21:23:40
 # @Last Modified by:   kostya
-# @Last Modified time: 2021-12-22 20:38:36
+# @Last Modified time: 2021-12-25 18:04:06
 
 import sys
 
@@ -53,8 +53,7 @@ class Instruction(object):
 		ADD_OPCODE, SUB_OPCODE, XOR_OPCODE, \
 		OR_OPCODE, AND_OPCODE, SLL_OPCODE, \
 		SRL_OPCODE, SRA_OPCODE, SLT_OPCODE, \
-		SLTIU_OPCODE, SLLI_OPCODE, SRLI_OPCODE, \
-		SRAI_OPCODE \
+	 	\
 	}
 	I_OPCODE = {
 		ADDI_OPCODE, XORI_OPCODE, ORI_OPCODE, \
@@ -307,10 +306,14 @@ class Instruction(object):
 instr_arr = []
 argv = sys.argv[1:]
 for instr in argv:
+	if instr.startswith('0b'):
+		instr = hex(int(instsr, 2))[2:]
 	print(f'parsing instruction {instr}')
 	print(Instruction(int(instr, 16)))
 	print()
 for instr in instr_arr:
+	if instr.startswith('0b'):
+		instr = hex(int(instsr, 2))[2:]
 	print(f'parsing instruction {instr}')
 	print(Instruction(instr))
 	print()
