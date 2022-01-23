@@ -17,9 +17,17 @@ li		x1		-1			# 0x00 # x1 = -1
 sw		x1		0(x0)		# 0x04 # 0x0 <- -1
 lw		x2		0(x0)		# 0x08 # x2 = -1
 lh		x3		0(x0)		# 0x0c # x3 = -1
+lh		x3		2(x0)		# 0x0c # x3 = -1
 lhu		x4		0(x0)		# 0x10 # x4 = 65535
+lhu		x4		2(x0)		# 0x10 # x4 = 65535
 lb		x5		0(x0)		# 0x14 # x5 = -1
+lb		x5		1(x0)		# 0x14 # x5 = -1
+lb		x5		2(x0)		# 0x14 # x5 = -1
+lb		x5		3(x0)		# 0x14 # x5 = -1
 lbu		x6		0(x0)		# 0x18 # x6 = 255
+lbu		x6		1(x0)		# 0x18 # x6 = 255
+lbu		x6		2(x0)		# 0x18 # x6 = 255
+lbu		x6		3(x0)		# 0x18 # x6 = 255
 
 li		x1		65538		# 0x1c # x1 = 65538
 li		x31		0x4			# 0x20 # x31 = 0x4
@@ -37,3 +45,18 @@ lh		x13		0x4(x31)	# 0x48 # x14 = 128
 lhu		x14		0x4(x31)	# 0x4c # x15 = 128
 lb		x15		0x4(x31)	# 0x50 # x16 = -128
 lbu		x16		0x4(x31)	# 0x54 # x17 = 128
+
+li		x17		0xAABBCCDD
+sw		x17		0x8(x0)
+lb		x18		0x8(x0)
+lb		x18		0x9(x0)
+lb		x18		0xa(x0)
+lb		x18		0xb(x0)
+lbu		x18		0x8(x0)
+lbu		x18		0x9(x0)
+lbu		x18		0xa(x0)
+lbu		x18		0xb(x0)
+lh		x19		0x8(x0)
+lh		x19		0xa(x0)
+lhu		x19		0x8(x0)
+lhu		x19		0xa(x0)
