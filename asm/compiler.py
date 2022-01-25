@@ -7,8 +7,6 @@
 import sys
 import platform
 
-from asm import contains_only
-
 error_index = 0
 
 
@@ -36,6 +34,13 @@ class AlwaysContains:
     def __contains__(self, _):
         return True
 
+
+# ------------------------------- UTILS FUNCTIONS ------------------------------
+def contains_only(st, available):
+    if len(set(st) | set(available)) > len(set(available)):
+        return False
+    else:
+        return True
 
 def twos_complement(n, bits=32):
     mask = (1 << bits) - 1
@@ -91,7 +96,9 @@ class ALU:
 
 class Immediate:
 
-    def __init__(self, imm, type):
+    def __init__(self, imm, imm_type):
+        if isinstance(imm, Label):
+            imm = imm.label
         if not contains_only(imm, '+-0123456789bBoOxX'):
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
         try:
@@ -100,32 +107,32 @@ class Immediate:
             msg = str(exc).split()
             msg = f'{msg[0]} {msg[1]} {msg[2]}: {imm}'
             raise RISCvSyntaxError(msg)
-        except NameError as exc:
+        except NameError:
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
-        if type in 'IS':
+        if imm_type in 'IS':
             rng = range(-2048, 2048)
             self.imm_bin = twos_complement(imm, 12)
-        elif type in 'B':
+        elif imm_type in 'B':
             rng = range(-2048, 2048)
             self.imm_bin = twos_complement(imm, 12)
-        elif type in 'U':
+        elif imm_type in 'U':
             rng = range(0, 1048576)
             self.imm_bin = twos_complement(imm, 20)
-        elif type in 'J':
+        elif imm_type in 'J':
             rng = range(-524288, 524288)
             self.imm_bin = twos_complement(imm, 20)
-        elif type == 'shift':
+        elif imm_type == 'shift':
             rng = range(0, 31)
             self.imm_bin = twos_complement(imm, 12)
-        elif type == 'check':
+        elif imm_type == 'check':
             rng = AlwaysContains()
         else:
             raise SystemError(
-                '[internal error]: Immediate::__init__ (invalid immediate type')
+                f'[internal error]: Immediate::__init__ (invalid immediate type: {imm_type})')
 
         if imm not in rng:
             raise RISCvImmediateError(
-                f'immediate of type {type} is out of range {str(rng)[5:]}')
+                f'immediate of type {imm_type} is out of range {str(rng)[5:]}')
 
     def __bytes__(self):
         return self.imm_bin
@@ -140,7 +147,7 @@ class Immediate:
             return self.imm_bin[::-1][idx.stop:idx.start][::-1]
 
 
-class Register():
+class Register:
     reg_map = {
         'zero': 0, 'x0': 0,
         'ra': 1, 'x1': 1,
@@ -179,7 +186,7 @@ class Register():
 
     def __init__(self, reg):
         if reg not in self.reg_map:
-            raise RISCvRegisterError(f'register {reg} is not recognozed')
+            raise RISCvRegisterError(f'register {reg} is not recognized')
         self.reg = self.reg_map[reg]
 
     def __bytes__(self):
@@ -187,6 +194,27 @@ class Register():
 
     def __repr__(self):
         return self.__bytes__()
+
+
+class Label:
+
+    labels = dict()
+
+    @staticmethod
+    def create(label, cnt):
+        if not label.isalnum():
+            raise RISCvLabelError(
+                f'label name can contain only digits and letters: {label}')
+        if label in Label.labels:
+            raise RISCvLabelError(f'label {label} redefined')
+        Label.labels[label] = cnt
+
+    def __init__(self, label, cnt):
+        if label in self.labels:
+            if cnt is not None:
+                self.label = self.labels[label] - cnt
+        else:
+            raise RISCvLabelError(f'label {label} is not defined')
 
 
 class Funct3:
@@ -244,27 +272,26 @@ class Instruction:
     B_inst = {'beq', 'bne', 'blt', 'bge', 'bltu', 'bgeu'}
     U_inst = {'lui', 'auipc'}
     J_inst = {'jal'}
-    Pseudo_inst = {'la', 'nop', 'mv', 'not', 'neg', 'seqz', 'sneq', 'sltz',
-                   'sgez',
-                   'beqz', 'bnez', 'blez', 'bgez', 'bltz',
-                   'bgtz', 'ble', 'bgtu', 'bleu', 'j', 'jr', 'ret', 'call',
-                   'tail'}
+    Pseudo_inst = {}
+    # Pseudo_inst = {'la', 'nop', 'mv', 'not', 'neg', 'seqz', 'sneq', 'sltz',
+    #                'sgez',
+    #                'beqz', 'bnez', 'blez', 'bgez', 'bltz',
+    #                'bgtz', 'ble', 'bgtu', 'bleu', 'j', 'jr', 'ret', 'call',
+    #                'tail'}
 
     def __init__(self):
         self.labels = dict()
+        self.instr_cnt = None
 
     def parse(self, line, instr_cnt):
+        global error_index
+
+        self.instr_cnt = instr_cnt
         split = line.split()
         error_index = -1
         while split[0].endswith(':'):
             error_index += 1
-            label = split[0][:-1]
-            if not label.isalnum():
-                raise RISCvLabelError(
-                    f"label name can contain only digits and letters: {label}")
-            if label in self.labels:
-                raise RISCvLabelError(f"label {label} redefined")
-            self.labels[label] = instr_cnt
+            Label.create(split[0][:-1], instr_cnt)
             del split[0]
             if len(split) == 0:
                 return None
@@ -280,26 +307,29 @@ class Instruction:
 
         op = split[0].lower()
         if op in self.R_inst:
-            instr = self.Rtype(split)
+            instr = self.r_type(split)
         elif op in self.I_inst:
-            instr = self.Itype(split)
+            instr = self.i_type(split)
         elif op in self.S_inst:
-            instr = self.Stype(split)
+            instr = self.s_type(split)
         elif op in self.B_inst:
-            instr = self.Btype(split)
+            instr = self.b_type(split)
         elif op in self.U_inst:
-            instr = self.Utype(split)
+            instr = self.u_type(split)
         elif op in self.J_inst:
-            instr = self.Jtype(split)
+            instr = self.j_type(split)
         elif op in self.Pseudo_inst:
-            instr = self.PseudoType(split)
+            instr = self.pseudo_type(split)
         else:
             raise RISCvSyntaxError(
                 '{YELLOW}illegal instruction {CYAN}`' + op[0] + '`{RESET}')
         return instr
 
     def check_args(self, line, fmt):
+        global error_index
+
         for i in range(len(fmt)):
+            error_index = i
             if i >= len(line):
                 if fmt[i] == 'imm':
                     raise RISCvSyntaxError('expected immediate value')
@@ -307,23 +337,34 @@ class Instruction:
                     raise RISCvSyntaxError('expected register')
                 elif fmt[i] == 'label':
                     raise RISCvSyntaxError('expected label')
+                elif fmt[i] == 'offset':
+                    raise RISCvSyntaxError('expected offset value')
                 else:
-                    raise SyntaxError(
-                        f'unexpected format checker value: `{fmt[i]}`')
+                    raise SystemError(
+                        f'[internal error]: Instruction::check_args (invalid format checker value {fmt[i]})')
             elif fmt[i] == 'imm':
-                continue
+                _ = Immediate(line[i], 'any')
             elif fmt[i] == 'reg':
-                continue
+                _ = Register(line[i])
             elif fmt[i] == 'label':
-                if fmt[i] in self.labels:
-                    return self.labels[fmt[i]]
-                else:
-                    pass
+                _ = Label(line[i], None)
+            elif fmt[i] == 'offset':
+                _ = self.parse_offset(line[i])
+            else:
+                raise SystemError(
+                    f'[internal error]: Instruction::check_args (invalid format checker value {fmt[i]})')
 
-    def parse_offset(self, offset):
-        return 0, 0
+    @staticmethod
+    def parse_offset(offset):
+        split = offset.split('(')
+        if len(split) > 2:
+            raise RISCvSyntaxError(f'invalid offset format: {offset}')
+        imm, reg = split
+        imm = Immediate(imm, 'any')
+        reg = Register(reg)
+        return imm, reg
 
-    def Rtype(self, line):
+    def r_type(self, line):
 
         op_ht = {
             'slli': OpHt(funct7=0b0000000, funct3=0b001, opcode=0b0010011),
@@ -341,13 +382,14 @@ class Instruction:
             'and': OpHt(funct7=0b0000000, funct3=0b111, opcode=0b0110011),
         }
 
-        self.check_args(line, ('op', 'reg', 'reg', ('reg', 'imm')))
-
         op = line[0]
+
         funct7 = op_ht[op].funct7
         if op in ('slli', 'srli', 'srai'):
+            self.check_args(line, ('op', 'reg', 'reg', 'imm'))
             rs2 = Immediate(line[3], 'shift')
         else:
+            self.check_args(line, ('op', 'reg', 'reg', 'reg'))
             rs2 = Register(line[3])
 
         rs1 = Register(line[2])
@@ -358,7 +400,7 @@ class Instruction:
         instr_bin = f'{funct7}{rs2}{rs1}{funct3}{rd}{opcode}'
         return [instr_bin]
 
-    def Itype(self, line):
+    def i_type(self, line):
 
         op_ht = {
             'lb': OpHt(funct3=0b000, opcode=0b0000011),
@@ -386,7 +428,7 @@ class Instruction:
         instr_bin = f'{imm}{rs1}{funct3}{rd}{opcode}'
         return [instr_bin]
 
-    def Stype(self, line):
+    def s_type(self, line):
 
         op_ht = {
             'sb': OpHt(funct3=0b000, opcode=0b0100011),
@@ -407,7 +449,7 @@ class Instruction:
         instr_bin = f'{imm[11:5]}{rs2}{rs1}{funct3}{imm[4:0]}{opcode}'
         return [instr_bin]
 
-    def Btype(self, line):
+    def b_type(self, line):
 
         op_ht = {
             'beq': OpHt(funct3=0b000, opcode=0b1100011),
@@ -418,19 +460,20 @@ class Instruction:
             'bgeu': OpHt(funct3=0b111, opcode=0b1100011)
         }
 
-        imm = self.check_args(line, ('reg', 'reg', 'label', 'imm'))
+        self.check_args(line, ('reg', 'reg', 'label'))
 
         op = line[0]
-        imm = Immediate(imm, 'B')
+        label = Label(line[3], self.instr_cnt)
+        imm = Immediate(label, 'B')
         rs2 = Register(line[2])
         rs1 = Register(line[1])
         funct3 = op_ht[op].funct3
         opcode = op_ht[op].opcode
 
-        instr_bin = f'{imm[11]}{imm[19:4]}{rs2}{rs1}{funct3}{imm[3:0]}{imm[10]}'
+        instr_bin = f'{imm[11]}{imm[19:4]}{rs2}{rs1}{funct3}{imm[3:0]}{imm[10]}{opcode}'
         return [instr_bin]
 
-    def Utype(self, line):
+    def u_type(self, line):
 
         op_ht = {
             'lui': OpHt(opcode=0b0110111),
@@ -447,13 +490,13 @@ class Instruction:
         instr_bin = f'{imm}{reg}{opcode}'
         return [instr_bin]
 
-    def Jtype(self, line):
+    def j_type(self, line):
 
         op_ht = {
             'jal': OpHt(opcode=0b1101111)
         }
 
-        imm = self.check_args(line, ('reg', 'label'))
+        self.check_args(line, ('reg', 'label'))
 
         op = line[0]
         imm = Immediate(line[2], 'J')
@@ -463,11 +506,11 @@ class Instruction:
         instr_bin = f'{imm[19]}{imm[9:0]}{imm[10]}{imm[18:11]}{reg}{opcode}'
         return [instr_bin]
 
-    def PseudoType(self, line):
-        return None
+    def pseudo_type(self, line):
+        return ''
 
 
-def compile(file):
+def compile_line(file):
     instr = Instruction()
     instructions = []
     line_num = 0
@@ -479,9 +522,9 @@ def compile(file):
         line = line.strip()
         if '#' in line:
             line = line[:line.index('#')]
-        next = instr.parse(line, line_num)
-        instructions += next
-        line_num += len(next)
+        compiled = instr.parse(line, line_num)
+        instructions += compiled
+        line_num += len(compiled)
 
 
 def main():
@@ -497,8 +540,8 @@ def main():
             continue
         try:
             with open(file, 'r') as f:
-                instr = compile(f)
-        except FileNotFoundError as exc:
+                instr = compile_line(f)
+        except FileNotFoundError:
             print(f'cannot open {f.name}')
         else:
             print('compilation successful')
