@@ -305,13 +305,13 @@ instr_arr = []
 argv = sys.argv[1:]
 for instr in argv:
 	if instr.startswith('0b'):
-		instr = hex(int(instsr, 2))[2:]
-	print(f'parsing instruction {instr}')
+		instr = hex(int(instr, 2))[2:]
+	# print(f'parsing instruction {instr}')
 	print(Instruction(int(instr, 16)))
 	print()
 for instr in instr_arr:
 	if instr.startswith('0b'):
-		instr = hex(int(instsr, 2))[2:]
-	print(f'parsing instruction {instr}')
+		instr = hex(int(instr, 2))[2:]
+	# print(f'parsing instruction {instr}')
 	print(Instruction(instr))
 	print()

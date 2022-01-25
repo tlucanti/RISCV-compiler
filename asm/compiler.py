@@ -6,6 +6,7 @@
 
 import sys
 import platform
+import re
 
 error_index = 0
 
@@ -42,11 +43,13 @@ def contains_only(st, available):
     else:
         return True
 
+
 def twos_complement(n, bits=32):
+    n = int(n)
     mask = (1 << bits) - 1
     if n < 0:
         n = ((abs(n) ^ mask) + 1)
-    return bin(n & mask)[2:]
+    return '{n:0{bits}b}'.format(n=n & mask, bits=bits)
 
 
 # ----------------------------- EXCEPTIONS CLASSES -----------------------------
@@ -99,15 +102,22 @@ class Immediate:
     def __init__(self, imm, imm_type):
         if isinstance(imm, Label):
             imm = imm.label
-        if not contains_only(imm, '+-0123456789bBoOxX'):
+        if not contains_only(imm, '+-0123456789bBoOxXabcdABCD'):
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
-        try:
-            exec(f'imm = {imm}')
-        except SyntaxError as exc:
-            msg = str(exc).split()
-            msg = f'{msg[0]} {msg[1]} {msg[2]}: {imm}'
-            raise RISCvSyntaxError(msg)
-        except NameError:
+        self.imm = None
+        if re.fullmatch('^[-+]?[0-9]+$', str(imm)) is not None:
+            self.imm_int = int(imm)
+            imm = self.imm_int
+        elif re.fullmatch('^[-+]?0[xX][0-9a-fA-F]+$', str(imm)) is not None:
+            self.imm_int = int(imm, 16)
+            imm = self.imm_int
+        elif re.fullmatch('^[-+]?0[oO][0-7]+$', str(imm)) is not None:
+            self.imm_int = int(imm, 8)
+            imm = self.imm_int
+        elif re.fullmatch('^[-+]?0[bB][0-1]+$', str(imm)) is not None:
+            self.imm_int = int(imm, 2)
+            imm = self.imm_int
+        else:
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
         if imm_type in 'IS':
             rng = range(-2048, 2048)
@@ -124,8 +134,13 @@ class Immediate:
         elif imm_type == 'shift':
             rng = range(0, 31)
             self.imm_bin = twos_complement(imm, 12)
-        elif imm_type == 'check':
+        elif imm_type == 'any':
             rng = AlwaysContains()
+        elif imm_type == 'li':
+            if imm < 0:
+                rng = range(-2147483648, 2147483648)
+            else:
+                rng = range(0, 4294967296)
         else:
             raise SystemError(
                 f'[internal error]: Immediate::__init__ (invalid immediate type: {imm_type})')
@@ -144,7 +159,7 @@ class Immediate:
         if isinstance(idx, int):
             return self.imm_bin[::-1][idx]
         else:
-            return self.imm_bin[::-1][idx.stop:idx.start][::-1]
+            return self.imm_bin[::-1][idx.stop:idx.start + 1][::-1]
 
 
 class Register:
@@ -188,6 +203,7 @@ class Register:
         if reg not in self.reg_map:
             raise RISCvRegisterError(f'register {reg} is not recognized')
         self.reg = self.reg_map[reg]
+        self.str = reg
 
     def __bytes__(self):
         return '{reg:05b}'.format(reg=self.reg)
@@ -272,7 +288,7 @@ class Instruction:
     B_inst = {'beq', 'bne', 'blt', 'bge', 'bltu', 'bgeu'}
     U_inst = {'lui', 'auipc'}
     J_inst = {'jal'}
-    Pseudo_inst = {}
+    Pseudo_inst = {'li'}
     # Pseudo_inst = {'la', 'nop', 'mv', 'not', 'neg', 'seqz', 'sneq', 'sltz',
     #                'sgez',
     #                'beqz', 'bnez', 'blez', 'bgez', 'bltz',
@@ -289,12 +305,12 @@ class Instruction:
         self.instr_cnt = instr_cnt
         split = line.split()
         error_index = -1
-        while split[0].endswith(':'):
+        while len(split) > 0 and split[0].endswith(':'):
             error_index += 1
             Label.create(split[0][:-1], instr_cnt)
             del split[0]
-            if len(split) == 0:
-                return None
+        if len(split) == 0:
+            return []
 
         _error_index = error_index
         error_index -= 1
@@ -328,6 +344,7 @@ class Instruction:
     def check_args(self, line, fmt):
         global error_index
 
+        line = line[1:]
         for i in range(len(fmt)):
             error_index = i
             if i >= len(line):
@@ -341,7 +358,7 @@ class Instruction:
                     raise RISCvSyntaxError('expected offset value')
                 else:
                     raise SystemError(
-                        f'[internal error]: Instruction::check_args (invalid format checker value {fmt[i]})')
+                        f'[internal error]: compiler::Instruction::check_args (invalid format checker value {fmt[i]})')
             elif fmt[i] == 'imm':
                 _ = Immediate(line[i], 'any')
             elif fmt[i] == 'reg':
@@ -352,17 +369,18 @@ class Instruction:
                 _ = self.parse_offset(line[i])
             else:
                 raise SystemError(
-                    f'[internal error]: Instruction::check_args (invalid format checker value {fmt[i]})')
+                    f'[internal error]: compiler::Instruction::check_args (invalid format checker value {fmt[i]})')
 
     @staticmethod
     def parse_offset(offset):
         split = offset.split('(')
         if len(split) > 2:
             raise RISCvSyntaxError(f'invalid offset format: {offset}')
-        imm, reg = split
-        imm = Immediate(imm, 'any')
-        reg = Register(reg)
-        return imm, reg
+        imm_str, reg_str = split
+        reg_str = reg_str[:-1]
+        _ = Immediate(imm_str, 'any')
+        _ = Register(reg_str)
+        return imm_str, reg_str
 
     def r_type(self, line):
 
@@ -386,10 +404,10 @@ class Instruction:
 
         funct7 = op_ht[op].funct7
         if op in ('slli', 'srli', 'srai'):
-            self.check_args(line, ('op', 'reg', 'reg', 'imm'))
+            self.check_args(line, ('reg', 'reg', 'imm'))
             rs2 = Immediate(line[3], 'shift')
         else:
-            self.check_args(line, ('op', 'reg', 'reg', 'reg'))
+            self.check_args(line, ('reg', 'reg', 'reg'))
             rs2 = Register(line[3])
 
         rs1 = Register(line[2])
@@ -416,11 +434,16 @@ class Instruction:
             'andi': OpHt(funct3=0b111, opcode=0b0010011)
         }
 
-        self.check_args(line, ('op', 'reg', 'reg', 'imm'))
-
         op = line[0]
-        imm = Immediate(line[3], 'I')
-        rs1 = Register(line[2])
+        if op in {'lb', 'lh', 'lw', 'lbu', 'lhu'}:
+            self.check_args(line, ('reg', 'offset'))
+            imm, rs1 = self.parse_offset(line[2])
+            imm = Immediate(imm, 'I')
+            rs1 = Register(rs1)
+        else:
+            self.check_args(line, ('reg', 'reg', 'imm'))
+            imm = Immediate(line[3], 'I')
+            rs1 = Register(line[2])
         funct3 = op_ht[op].funct3
         rd = Register(line[1])
         opcode = op_ht[op].opcode
@@ -440,7 +463,7 @@ class Instruction:
 
         op = line[0]
         imm, rs1 = self.parse_offset(line[2])
-        imm = Immediate(imm, 'I')
+        imm = Immediate(imm, 'S')
         rs2 = Register(line[1])
         rs1 = Register(rs1)
         funct3 = op_ht[op].funct3
@@ -507,22 +530,51 @@ class Instruction:
         return [instr_bin]
 
     def pseudo_type(self, line):
-        return ''
+        op = line[0]
+
+        if op == 'li':
+            self.check_args(line, ('reg', 'imm'))
+            reg = Register(line[1])
+            imm = Immediate(line[2], 'li')
+            if 2048 <= imm.imm_int or imm.imm_int < -2048:
+                imm = twos_complement(imm.imm_int, 32)
+                imm = int(imm, 2)
+                upper_immediate = imm >> 12
+                if imm - (upper_immediate << 12) >= 2048:
+                    upper_immediate += 1
+                elif imm - (upper_immediate << 12) < -2048:
+                    upper_immediate -= 1
+                lui = self.parse(f'lui {reg.str} {upper_immediate}', self.instr_cnt)
+                rs1 = reg.str
+            else:
+                upper_immediate = 0
+                imm = imm.imm_int
+                lui = []
+                rs1 = 'x0'
+            self.instr_cnt += 1
+            addi = self.parse(f'addi {reg.str} {rs1} {imm - (upper_immediate << 12)}', self.instr_cnt)
+            return lui + addi
 
 
-def compile_line(file):
+def compile_file(file):
     instr = Instruction()
     instructions = []
     line_num = 0
     while True:
         line = file.readline()
         if line == '':
-            return instr
-        line = line.strip('\n')
-        line = line.strip()
+            return instructions
         if '#' in line:
             line = line[:line.index('#')]
+        line = line.expandtabs(4)
+        line = line.replace(',', '')
+        line = line.strip('\n')
+        line = line.strip()
         compiled = instr.parse(line, line_num)
+        for inst in compiled:
+            if len(inst) != 32:
+                raise SystemError("[internal error] compiler::compile_file (instruction length not equal 32)")
+        compiled = ['{:08x}'.format(int(instr, 2)) for instr in compiled]
         instructions += compiled
         line_num += len(compiled)
 
@@ -531,7 +583,7 @@ def main():
     if len(sys.argv) == 1:
         print('no input files')
         return
-    for file in sys.argv:
+    for file in sys.argv[1:]:
         if not file.endswith('.s'):
             if '.' in file:
                 print(f'unsupported file format: .{file.split(".")[-1]}')
@@ -540,7 +592,8 @@ def main():
             continue
         try:
             with open(file, 'r') as f:
-                instr = compile_line(f)
+                print(f'started compiling {file}')
+                instr = compile_file(f)
         except FileNotFoundError:
             print(f'cannot open {f.name}')
         else:
