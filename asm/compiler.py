@@ -296,7 +296,15 @@ class Instruction:
     #                'tail'}
 
     def __init__(self):
-        self.labels = dict()
+
+        imm = None
+        funct7 = None
+        funct3 = None
+        rs1 = None
+        rs2 = None
+        rd = None
+        label = None
+        opcode = None
         self.instr_cnt = None
 
     def parse(self, line, instr_cnt):
@@ -371,6 +379,36 @@ class Instruction:
                 raise SystemError(
                     f'[internal error]: compiler::Instruction::check_args (invalid format checker value {fmt[i]})')
 
+    def compile(self):
+
+        imm = self.imm
+        funct7 = self.funct7
+        funct3 = self.funct3
+        rs1 = self.rs1
+        rs2 = self.rs2
+        rd = self.rd
+        label = self.label
+        opcode = self.opcode
+
+        if self.type == 'R':
+            instr_bin = f'{funct7}{rs2}{rs1}{funct3}{rd}{opcode}'
+        elif self.type == 'I':
+            instr_bin = f'{imm}{rs1}{funct3}{rd}{opcode}'
+        elif self.type == 'S':
+            instr_bin = f'{imm[11:5]}{rs2}{rs1}{funct3}{imm[4:0]}{opcode}'
+        elif self.type == 'B':
+            imm = Immediate(label, 'B')
+            instr_bin = f'{imm[11]}{imm[19:4]}{rs2}{rs1}{funct3}{imm[3:0]}{imm[10]}{opcode}'
+        elif self.type == 'U':
+            instr_bin = f'{imm}{reg}{opcode}'
+        elif self.type == 'J':
+            self.imm = Immediate(label, 'J')
+            instr_bin = f'{imm[19]}{imm[9:0]}{imm[10]}{imm[18:11]}{reg}{opcode}'
+        else:
+
+        return instr_bin
+
+
     @staticmethod
     def parse_offset(offset):
         split = offset.split('(')
@@ -400,23 +438,23 @@ class Instruction:
             'and': OpHt(funct7=0b0000000, funct3=0b111, opcode=0b0110011),
         }
 
-        op = line[0]
+        self.type = 'R'
+        self.op = line[0]
 
-        funct7 = op_ht[op].funct7
-        if op in ('slli', 'srli', 'srai'):
+        self.funct7 = op_ht[op].funct7
+        if self.op in ('slli', 'srli', 'srai'):
             self.check_args(line, ('reg', 'reg', 'imm'))
-            rs2 = Immediate(line[3], 'shift')
+            self.rs2 = Immediate(line[3], 'shift')
         else:
             self.check_args(line, ('reg', 'reg', 'reg'))
-            rs2 = Register(line[3])
+            self.rs2 = Register(line[3])
 
-        rs1 = Register(line[2])
-        funct3 = op_ht[op].funct3
-        rd = Register(line[1])
-        opcode = op_ht[op].opcode
+        self.rs1 = Register(line[2])
+        self.funct3 = op_ht[self.op].funct3
+        self.rd = Register(line[1])
+        self.opcode = op_ht[self.op].opcode
 
-        instr_bin = f'{funct7}{rs2}{rs1}{funct3}{rd}{opcode}'
-        return [instr_bin]
+        return [self]
 
     def i_type(self, line):
 
@@ -434,22 +472,23 @@ class Instruction:
             'andi': OpHt(funct3=0b111, opcode=0b0010011)
         }
 
-        op = line[0]
-        if op in {'lb', 'lh', 'lw', 'lbu', 'lhu'}:
+        self.type = 'I'
+        self.op = line[0]
+
+        if self.op in {'lb', 'lh', 'lw', 'lbu', 'lhu'}:
             self.check_args(line, ('reg', 'offset'))
-            imm, rs1 = self.parse_offset(line[2])
-            imm = Immediate(imm, 'I')
-            rs1 = Register(rs1)
+            self.imm, self.rs1 = self.parse_offset(line[2])
+            self.imm = Immediate(self.imm, 'I')
+            self.rs1 = Register(self.rs1)
         else:
             self.check_args(line, ('reg', 'reg', 'imm'))
-            imm = Immediate(line[3], 'I')
-            rs1 = Register(line[2])
-        funct3 = op_ht[op].funct3
-        rd = Register(line[1])
-        opcode = op_ht[op].opcode
+            self.imm = Immediate(line[3], 'I')
+            self.rs1 = Register(line[2])
+        self.funct3 = op_ht[self.op].funct3
+        self.rd = Register(line[1])
+        self.opcode = op_ht[self.op].opcode
 
-        instr_bin = f'{imm}{rs1}{funct3}{rd}{opcode}'
-        return [instr_bin]
+        return [self]
 
     def s_type(self, line):
 
@@ -461,16 +500,15 @@ class Instruction:
 
         self.check_args(line, ('reg', 'offset'))
 
-        op = line[0]
-        imm, rs1 = self.parse_offset(line[2])
-        imm = Immediate(imm, 'S')
-        rs2 = Register(line[1])
-        rs1 = Register(rs1)
-        funct3 = op_ht[op].funct3
-        opcode = op_ht[op].opcode
+        self.op = line[0]
+        self.imm, self.rs1 = self.parse_offset(line[2])
+        self.imm = Immediate(self.imm, 'S')
+        self.rs2 = Register(line[1])
+        self.rs1 = Register(self.rs1)
+        self.funct3 = op_ht[self.op].funct3
+        self.opcode = op_ht[self.op].opcode
 
-        instr_bin = f'{imm[11:5]}{rs2}{rs1}{funct3}{imm[4:0]}{opcode}'
-        return [instr_bin]
+        return [self]
 
     def b_type(self, line):
 
@@ -485,16 +523,15 @@ class Instruction:
 
         self.check_args(line, ('reg', 'reg', 'label'))
 
-        op = line[0]
-        label = Label(line[3], self.instr_cnt)
-        imm = Immediate(label, 'B')
-        rs2 = Register(line[2])
-        rs1 = Register(line[1])
-        funct3 = op_ht[op].funct3
-        opcode = op_ht[op].opcode
+        self.type = 'B'
+        self.op = line[0]
+        self.label = Label(line[3], self.instr_cnt)
+        self.rs2 = Register(line[2])
+        self.rs1 = Register(line[1])
+        self.funct3 = op_ht[self.op].funct3
+        self.opcode = op_ht[self.op].opcode
 
-        instr_bin = f'{imm[11]}{imm[19:4]}{rs2}{rs1}{funct3}{imm[3:0]}{imm[10]}{opcode}'
-        return [instr_bin]
+        return [self]
 
     def u_type(self, line):
 
@@ -505,13 +542,13 @@ class Instruction:
 
         self.check_args(line, ('reg', 'imm'))
 
-        op = line[0]
-        reg = Register(line[1])
-        imm = Immediate(line[2], 'U')
-        opcode = op_ht[op].opcode
+        self.type = 'U'
+        self.op = line[0]
+        self.reg = Register(line[1])
+        self.imm = Immediate(line[2], 'U')
+        self.opcode = op_ht[self.op].opcode
 
-        instr_bin = f'{imm}{reg}{opcode}'
-        return [instr_bin]
+        return [self]
 
     def j_type(self, line):
 
@@ -521,15 +558,16 @@ class Instruction:
 
         self.check_args(line, ('reg', 'label'))
 
-        op = line[0]
-        imm = Immediate(line[2], 'J')
-        reg = Register(line[1])
-        opcode = op_ht[op].opcode
+        self.type = 'J'
+        self.op = line[0]
+        self.label = Label(line[2])
+        self.reg = Register(line[1])
+        self.opcode = op_ht[self.op].opcode
 
-        instr_bin = f'{imm[19]}{imm[9:0]}{imm[10]}{imm[18:11]}{reg}{opcode}'
-        return [instr_bin]
+        return [self]
 
     def pseudo_type(self, line):
+        
         op = line[0]
 
         if op == 'li':
@@ -554,6 +592,8 @@ class Instruction:
             self.instr_cnt += 1
             addi = self.parse(f'addi {reg.str} {rs1} {imm - (upper_immediate << 12)}', self.instr_cnt)
             return lui + addi
+        else:
+            raise SystemError('[internal error] compiler::Instruction::pseudo_type (invalid pseudo instruction)')
 
 
 def compile_file(file):
@@ -563,20 +603,23 @@ def compile_file(file):
     while True:
         line = file.readline()
         if line == '':
-            return instructions
+            break
         if '#' in line:
             line = line[:line.index('#')]
         line = line.expandtabs(4)
         line = line.replace(',', '')
         line = line.strip('\n')
         line = line.strip()
-        compiled = instr.parse(line, line_num)
-        for inst in compiled:
-            if len(inst) != 32:
-                raise SystemError("[internal error] compiler::compile_file (instruction length not equal 32)")
-        compiled = ['{:08x}'.format(int(instr, 2)) for instr in compiled]
-        instructions += compiled
+        parsed = instr.parse(line, line_num)
+        instructions += parsed
         line_num += len(compiled)
+    for i in range(len(instructions)):
+        instructions[i] = instructions[i].compile()
+        inst = instructions[i]
+        if len(inst) != 32:
+            raise SystemError("[internal error] compiler::compile_file (instruction length not equal 32)")
+    instructions = ['{:08x}'.format(int(instr, 2)) for instr in instructions]
+    return instructions
 
 
 def main():
