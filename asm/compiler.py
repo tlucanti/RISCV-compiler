@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # @Author: kostya
 # @Date:   2021-12-08 20:56:10
-# @Last Modified by:   kostya
-# @Last Modified time: 2022-01-24 17:01:30
+# @Last Modified by:   tlucanti
+# @Last Modified time: 2022-01-27 00:07:37
 
 import sys
 import platform
@@ -100,40 +100,37 @@ class ALU:
 class Immediate:
 
     def __init__(self, imm, imm_type):
-        if isinstance(imm, Label):
-            imm = imm.label
+        imm = str(imm)
         if not contains_only(imm, '+-0123456789bBoOxXabcdABCD'):
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
         self.imm = None
         if re.fullmatch('^[-+]?[0-9]+$', str(imm)) is not None:
-            self.imm_int = int(imm)
-            imm = self.imm_int
+            imm = int(imm)
         elif re.fullmatch('^[-+]?0[xX][0-9a-fA-F]+$', str(imm)) is not None:
-            self.imm_int = int(imm, 16)
-            imm = self.imm_int
+            imm = int(imm, 16)
         elif re.fullmatch('^[-+]?0[oO][0-7]+$', str(imm)) is not None:
-            self.imm_int = int(imm, 8)
-            imm = self.imm_int
+            imm = int(imm, 8)
         elif re.fullmatch('^[-+]?0[bB][0-1]+$', str(imm)) is not None:
-            self.imm_int = int(imm, 2)
-            imm = self.imm_int
+            imm = int(imm, 2)
         else:
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
         if imm_type in 'IS':
             rng = range(-2048, 2048)
             self.imm_bin = twos_complement(imm, 12)
         elif imm_type in 'B':
+            imm <<= 1
             rng = range(-2048, 2048)
             self.imm_bin = twos_complement(imm, 12)
         elif imm_type in 'U':
             rng = range(0, 1048576)
             self.imm_bin = twos_complement(imm, 20)
         elif imm_type in 'J':
+            imm <<= 1
             rng = range(-524288, 524288)
             self.imm_bin = twos_complement(imm, 20)
         elif imm_type == 'shift':
             rng = range(0, 31)
-            self.imm_bin = twos_complement(imm, 12)
+            self.imm_bin = twos_complement(imm, 5)
         elif imm_type == 'any':
             rng = AlwaysContains()
         elif imm_type == 'li':
@@ -145,6 +142,7 @@ class Immediate:
             raise SystemError(
                 f'[internal error]: Immediate::__init__ (invalid immediate type: {imm_type})')
 
+        self.imm_int = imm
         if imm not in rng:
             raise RISCvImmediateError(
                 f'immediate of type {imm_type} is out of range {str(rng)[5:]}')
@@ -212,8 +210,24 @@ class Register:
         return self.__bytes__()
 
 
-class Label:
+class CsrRegister(Register):
 
+    reg_map = {
+        'mie': 0x304,
+        'mtvec': 0x305,
+        'mtscratch': 0x340,
+        'mepc': 0x341,
+        'mcause': 0x342
+    }
+
+    def __init__(self, reg):
+        super().__init__(reg)
+
+    def __bytes__(self):
+        return '{reg:012b}'.format(reg=self.reg)
+
+
+class Label:
     labels = dict()
 
     @staticmethod
@@ -225,12 +239,16 @@ class Label:
             raise RISCvLabelError(f'label {label} redefined')
         Label.labels[label] = cnt
 
-    def __init__(self, label, cnt):
-        if label in self.labels:
-            if cnt is not None:
-                self.label = self.labels[label] - cnt
-        else:
-            raise RISCvLabelError(f'label {label} is not defined')
+    def __init__(self, label):
+        if not label.isalnum():
+            raise RISCvLabelError(
+                f'label name can contain only digits and letters: {label}')
+        self.label = label
+
+    def to_immediate(self, imm_type, cnt):
+        if self.label not in self.labels:
+            raise RISCvLabelError(f'label {self.label} is not defined')
+        return Immediate(self.labels[self.label] - cnt, imm_type)
 
 
 class Funct3:
@@ -283,12 +301,13 @@ class Instruction:
               'srl', 'sra', 'or', 'ans'}
     I_inst = {'jalr', 'lb', 'lh', 'lw', 'lbu', 'lhu', 'addi', 'slti', 'sltiu',
               'xori', 'ori', 'andi', 'fence', 'ecall',
-              'ebreak'}
+              'ebreak', 'mret', 'csrrw', 'csrrs', 'csrrc'}
     S_inst = {'sb', 'sh', 'sw'}
     B_inst = {'beq', 'bne', 'blt', 'bge', 'bltu', 'bgeu'}
     U_inst = {'lui', 'auipc'}
     J_inst = {'jal'}
-    Pseudo_inst = {'li'}
+    Pseudo_inst = {'li', 'j'}
+
     # Pseudo_inst = {'la', 'nop', 'mv', 'not', 'neg', 'seqz', 'sneq', 'sltz',
     #                'sgez',
     #                'beqz', 'bnez', 'blez', 'bgez', 'bltz',
@@ -297,19 +316,27 @@ class Instruction:
 
     def __init__(self):
 
-        imm = None
-        funct7 = None
-        funct3 = None
-        rs1 = None
-        rs2 = None
-        rd = None
-        label = None
-        opcode = None
+        self.imm = None
+        self.funct7 = None
+        self.funct3 = None
+        self.rs1 = None
+        self.rs2 = None
+        self.rd = None
+        self.label = None
+        self.opcode = None
+        self.type = None
+        self.op = None
+        self.reg = None
         self.instr_cnt = None
+        self.line = None
+
+    def __repr__(self):
+        return self.line
 
     def parse(self, line, instr_cnt):
         global error_index
 
+        self.line = line
         self.instr_cnt = instr_cnt
         split = line.split()
         error_index = -1
@@ -372,14 +399,16 @@ class Instruction:
             elif fmt[i] == 'reg':
                 _ = Register(line[i])
             elif fmt[i] == 'label':
-                _ = Label(line[i], None)
+                _ = Label(line[i])
             elif fmt[i] == 'offset':
                 _ = self.parse_offset(line[i])
+            elif fmt[i] == 'csr':
+                _ = CsrRegister(line[i])
             else:
                 raise SystemError(
                     f'[internal error]: compiler::Instruction::check_args (invalid format checker value {fmt[i]})')
 
-    def compile(self):
+    def compile(self, instr_cnt):
 
         imm = self.imm
         funct7 = self.funct7
@@ -389,6 +418,7 @@ class Instruction:
         rd = self.rd
         label = self.label
         opcode = self.opcode
+        reg = self.reg
 
         if self.type == 'R':
             instr_bin = f'{funct7}{rs2}{rs1}{funct3}{rd}{opcode}'
@@ -397,17 +427,17 @@ class Instruction:
         elif self.type == 'S':
             instr_bin = f'{imm[11:5]}{rs2}{rs1}{funct3}{imm[4:0]}{opcode}'
         elif self.type == 'B':
-            imm = Immediate(label, 'B')
-            instr_bin = f'{imm[11]}{imm[19:4]}{rs2}{rs1}{funct3}{imm[3:0]}{imm[10]}{opcode}'
+            imm = label.to_immediate('B', instr_cnt)
+            instr_bin = f'{imm[11]}{imm[9:4]}{rs2}{rs1}{funct3}{imm[3:0]}{imm[10]}{opcode}'
         elif self.type == 'U':
             instr_bin = f'{imm}{reg}{opcode}'
         elif self.type == 'J':
-            self.imm = Immediate(label, 'J')
+            imm = label.to_immediate('J', instr_cnt)
             instr_bin = f'{imm[19]}{imm[9:0]}{imm[10]}{imm[18:11]}{reg}{opcode}'
         else:
+            raise SystemError(f'[internal error]: compiler::Instruction::compile (invalid isntruction type {self.type})')
 
         return instr_bin
-
 
     @staticmethod
     def parse_offset(offset):
@@ -441,7 +471,7 @@ class Instruction:
         self.type = 'R'
         self.op = line[0]
 
-        self.funct7 = op_ht[op].funct7
+        self.funct7 = op_ht[self.op].funct7
         if self.op in ('slli', 'srli', 'srai'):
             self.check_args(line, ('reg', 'reg', 'imm'))
             self.rs2 = Immediate(line[3], 'shift')
@@ -459,6 +489,7 @@ class Instruction:
     def i_type(self, line):
 
         op_ht = {
+            'jalr': OpHt(funct3=0b000, opcode=0b1100111),
             'lb': OpHt(funct3=0b000, opcode=0b0000011),
             'lh': OpHt(funct3=0b001, opcode=0b0000011),
             'lw': OpHt(funct3=0b010, opcode=0b0000011),
@@ -469,23 +500,39 @@ class Instruction:
             'sltiu': OpHt(funct3=0b011, opcode=0b0010011),
             'xori': OpHt(funct3=0b100, opcode=0b0010011),
             'ori': OpHt(funct3=0b110, opcode=0b0010011),
-            'andi': OpHt(funct3=0b111, opcode=0b0010011)
+            'andi': OpHt(funct3=0b111, opcode=0b0010011),
+            'mret': OpHt(funct3=0b000, opcode=0b1110011),
+            'csrrw': OpHt(funct3=0b001, opcode=0b1110011),
+            'csrrs': OpHt(funct3=0b010, opcode=0b1110011),
+            'csrrc': OpHt(funct3=0b011, opcode=0b1110011)
         }
 
         self.type = 'I'
         self.op = line[0]
 
-        if self.op in {'lb', 'lh', 'lw', 'lbu', 'lhu'}:
+        if self.op in {'mret'}:
+            self.check_args(line, ())
+            self.imm = Immediate(0, 'I')
+            self.rs1 = Register('x0')
+            self.rd = Register('x0')
+        elif self.op in {'csrrw', 'csrrs', 'csrrc'}:
+            self.check_args(line, ('reg', 'csr', 'reg'))
+            self.imm = CsrRegister(line[2])
+            self.rs1 = Register(line[3])
+            self.rd = Register(line[1])
+        elif self.op in {'lb', 'lh', 'lw', 'lbu', 'lhu'}:
             self.check_args(line, ('reg', 'offset'))
             self.imm, self.rs1 = self.parse_offset(line[2])
             self.imm = Immediate(self.imm, 'I')
             self.rs1 = Register(self.rs1)
+            self.rd = Register(line[1])
         else:
             self.check_args(line, ('reg', 'reg', 'imm'))
             self.imm = Immediate(line[3], 'I')
             self.rs1 = Register(line[2])
+            self.rd = Register(line[1])
         self.funct3 = op_ht[self.op].funct3
-        self.rd = Register(line[1])
+
         self.opcode = op_ht[self.op].opcode
 
         return [self]
@@ -500,6 +547,7 @@ class Instruction:
 
         self.check_args(line, ('reg', 'offset'))
 
+        self.type = 'S'
         self.op = line[0]
         self.imm, self.rs1 = self.parse_offset(line[2])
         self.imm = Immediate(self.imm, 'S')
@@ -525,7 +573,7 @@ class Instruction:
 
         self.type = 'B'
         self.op = line[0]
-        self.label = Label(line[3], self.instr_cnt)
+        self.label = Label(line[3])
         self.rs2 = Register(line[2])
         self.rs1 = Register(line[1])
         self.funct3 = op_ht[self.op].funct3
@@ -567,7 +615,7 @@ class Instruction:
         return [self]
 
     def pseudo_type(self, line):
-        
+
         op = line[0]
 
         if op == 'li':
@@ -582,7 +630,7 @@ class Instruction:
                     upper_immediate += 1
                 elif imm - (upper_immediate << 12) < -2048:
                     upper_immediate -= 1
-                lui = self.parse(f'lui {reg.str} {upper_immediate}', self.instr_cnt)
+                lui = Instruction().parse(f'lui {reg.str} {upper_immediate}', self.instr_cnt)
                 rs1 = reg.str
             else:
                 upper_immediate = 0
@@ -590,16 +638,19 @@ class Instruction:
                 lui = []
                 rs1 = 'x0'
             self.instr_cnt += 1
-            addi = self.parse(f'addi {reg.str} {rs1} {imm - (upper_immediate << 12)}', self.instr_cnt)
+            addi = Instruction().parse(f'addi `{reg.str} {rs1} {imm - (upper_immediate << 12)}', self.instr_cnt)
             return lui + addi
+        elif op == 'j':
+            self.check_args(line, ('label',))
+            return Instruction().parse(f'jal x0 {line[1]}', self.instr_cnt)
         else:
-            raise SystemError('[internal error] compiler::Instruction::pseudo_type (invalid pseudo instruction)')
+            raise SystemError(f'[internal error] compiler::Instruction::pseudo_type (invalid pseudo instruction {op})')
 
 
 def compile_file(file):
-    instr = Instruction()
     instructions = []
     line_num = 0
+    Label.labels = dict()
     while True:
         line = file.readline()
         if line == '':
@@ -610,11 +661,11 @@ def compile_file(file):
         line = line.replace(',', '')
         line = line.strip('\n')
         line = line.strip()
-        parsed = instr.parse(line, line_num)
+        parsed = Instruction().parse(line, line_num)
         instructions += parsed
-        line_num += len(compiled)
+        line_num += len(parsed)
     for i in range(len(instructions)):
-        instructions[i] = instructions[i].compile()
+        instructions[i] = instructions[i].compile(i)
         inst = instructions[i]
         if len(inst) != 32:
             raise SystemError("[internal error] compiler::compile_file (instruction length not equal 32)")
