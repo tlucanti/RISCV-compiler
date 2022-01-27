@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # @Author: kostya
 # @Date:   2021-12-08 20:56:10
-# @Last Modified by:   tlucanti
-# @Last Modified time: 2022-01-27 00:07:37
+# @Last Modified by:   kostya
+# @Last Modified time: 2022-01-27 12:38:47
 
 import sys
 import platform
@@ -101,31 +101,30 @@ class Immediate:
 
     def __init__(self, imm, imm_type):
         imm = str(imm)
-        if not contains_only(imm, '+-0123456789bBoOxXabcdABCD'):
+        if not contains_only(imm, '+-0123456789bBoOxXabcdefABCDEF'):
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
         self.imm = None
-        if re.fullmatch('^[-+]?[0-9]+$', str(imm)) is not None:
+        if re.fullmatch('^[-+]?[0-9]+$', imm) is not None:
             imm = int(imm)
-        elif re.fullmatch('^[-+]?0[xX][0-9a-fA-F]+$', str(imm)) is not None:
+        elif re.fullmatch('^[-+]?0[xX][0-9a-fA-F]+$', imm) is not None:
             imm = int(imm, 16)
-        elif re.fullmatch('^[-+]?0[oO][0-7]+$', str(imm)) is not None:
+        elif re.fullmatch('^[-+]?0[oO][0-7]+$', imm) is not None:
             imm = int(imm, 8)
-        elif re.fullmatch('^[-+]?0[bB][0-1]+$', str(imm)) is not None:
+        elif re.fullmatch('^[-+]?0[bB][0-1]+$', imm) is not None:
             imm = int(imm, 2)
         else:
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
+
         if imm_type in 'IS':
             rng = range(-2048, 2048)
             self.imm_bin = twos_complement(imm, 12)
         elif imm_type in 'B':
-            imm <<= 1
             rng = range(-2048, 2048)
             self.imm_bin = twos_complement(imm, 12)
         elif imm_type in 'U':
             rng = range(0, 1048576)
             self.imm_bin = twos_complement(imm, 20)
         elif imm_type in 'J':
-            imm <<= 1
             rng = range(-524288, 524288)
             self.imm_bin = twos_complement(imm, 20)
         elif imm_type == 'shift':
@@ -196,10 +195,11 @@ class Register:
         't5': 30, 'x30': 30,
         't6': 31, 'x31': 31,
     }
+    message = 'register {reg} is not recognized'
 
     def __init__(self, reg):
         if reg not in self.reg_map:
-            raise RISCvRegisterError(f'register {reg} is not recognized')
+            raise RISCvRegisterError(self.message.format(reg=reg))
         self.reg = self.reg_map[reg]
         self.str = reg
 
@@ -215,10 +215,11 @@ class CsrRegister(Register):
     reg_map = {
         'mie': 0x304,
         'mtvec': 0x305,
-        'mtscratch': 0x340,
+        'mscratch': 0x340,
         'mepc': 0x341,
         'mcause': 0x342
     }
+    message = 'csr register {reg} is not recognized'
 
     def __init__(self, reg):
         super().__init__(reg)
@@ -248,7 +249,12 @@ class Label:
     def to_immediate(self, imm_type, cnt):
         if self.label not in self.labels:
             raise RISCvLabelError(f'label {self.label} is not defined')
-        return Immediate(self.labels[self.label] - cnt, imm_type)
+        imm = self.labels[self.label] - cnt
+        if imm_type == 'la':
+            imm += 1
+            imm <<= 1
+            imm_type = 'I'
+        return Immediate(imm << 1, imm_type)
 
 
 class Funct3:
@@ -300,13 +306,13 @@ class Instruction:
     R_inst = {'slli', 'srli', 'srai', 'add', 'sub', 'sll', 'slt', 'sltu', 'xor',
               'srl', 'sra', 'or', 'ans'}
     I_inst = {'jalr', 'lb', 'lh', 'lw', 'lbu', 'lhu', 'addi', 'slti', 'sltiu',
-              'xori', 'ori', 'andi', 'fence', 'ecall',
+              'xori', 'ori', 'andi',
               'ebreak', 'mret', 'csrrw', 'csrrs', 'csrrc'}
     S_inst = {'sb', 'sh', 'sw'}
     B_inst = {'beq', 'bne', 'blt', 'bge', 'bltu', 'bgeu'}
     U_inst = {'lui', 'auipc'}
     J_inst = {'jal'}
-    Pseudo_inst = {'li', 'j'}
+    Pseudo_inst = {'li', 'j', 'la', 'csrr', 'csrw'}
 
     # Pseudo_inst = {'la', 'nop', 'mv', 'not', 'neg', 'seqz', 'sneq', 'sltz',
     #                'sgez',
@@ -420,6 +426,10 @@ class Instruction:
         opcode = self.opcode
         reg = self.reg
 
+        if self.type == 'la':
+            imm = label.to_immediate('la', instr_cnt)
+            self.type = 'I'
+
         if self.type == 'R':
             instr_bin = f'{funct7}{rs2}{rs1}{funct3}{rd}{opcode}'
         elif self.type == 'I':
@@ -504,15 +514,21 @@ class Instruction:
             'mret': OpHt(funct3=0b000, opcode=0b1110011),
             'csrrw': OpHt(funct3=0b001, opcode=0b1110011),
             'csrrs': OpHt(funct3=0b010, opcode=0b1110011),
-            'csrrc': OpHt(funct3=0b011, opcode=0b1110011)
+            'csrrc': OpHt(funct3=0b011, opcode=0b1110011),
+            'ebreak': OpHt(funct3=0b000, opcode=0b1110011)
         }
 
         self.type = 'I'
         self.op = line[0]
 
-        if self.op in {'mret'}:
+        if self.op in {'mret', 'ebreak'}:
             self.check_args(line, ())
-            self.imm = Immediate(0, 'I')
+            if self.op == 'mret':
+                self.imm = Immediate(0, 'I')
+            elif self.op == 'ebreak':
+                self.imm = Immediate(1, 'I')
+            else:
+                raise SyntaxError(f'[internal error] compiler::Instruction::i_type (invalid system instruction {self.op})')
             self.rs1 = Register('x0')
             self.rd = Register('x0')
         elif self.op in {'csrrw', 'csrrs', 'csrrc'}:
@@ -631,6 +647,7 @@ class Instruction:
                 elif imm - (upper_immediate << 12) < -2048:
                     upper_immediate -= 1
                 lui = Instruction().parse(f'lui {reg.str} {upper_immediate}', self.instr_cnt)
+                self.instr_cnt += 1
                 rs1 = reg.str
             else:
                 upper_immediate = 0
@@ -638,11 +655,36 @@ class Instruction:
                 lui = []
                 rs1 = 'x0'
             self.instr_cnt += 1
-            addi = Instruction().parse(f'addi `{reg.str} {rs1} {imm - (upper_immediate << 12)}', self.instr_cnt)
+            addi = Instruction().parse(f'addi {reg.str} {rs1} {imm - (upper_immediate << 12)}', self.instr_cnt)
             return lui + addi
         elif op == 'j':
             self.check_args(line, ('label',))
             return Instruction().parse(f'jal x0 {line[1]}', self.instr_cnt)
+        elif op == 'la':
+
+            auipc = Instruction().parse(f'auipc {line[1]} 0', self.instr_cnt)
+            self.instr_cnt += 1
+            op_ht = {
+                'la': OpHt(funct3=0b000, opcode=0b0010011),
+            }
+
+            self.check_args(line, ('reg', 'label'))
+
+            self.type = 'la'
+            self.op = line[0]
+            self.label = Label(line[2])
+            self.rd = Register(line[1])
+            self.rs1 = Register(line[1])
+            self.funct3 = op_ht[self.op].funct3
+            self.opcode = op_ht[self.op].opcode
+
+            return auipc + [self]
+        elif op == 'csrr':
+            self.check_args(line, ('reg', 'csr'))
+            return Instruction().parse(f'csrrs {line[1]} {line[2]} zero', self.instr_cnt)
+        elif op == 'csrw':
+            self.check_args(line, ('csr', 'reg'))
+            return Instruction().parse(f'csrrw zero {line[1]} {line[2]}', self.instr_cnt)
         else:
             raise SystemError(f'[internal error] compiler::Instruction::pseudo_type (invalid pseudo instruction {op})')
 
