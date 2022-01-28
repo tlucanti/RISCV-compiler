@@ -2,7 +2,7 @@
 # @Author: kostya
 # @Date:   2021-12-08 20:56:10
 # @Last Modified by:   kostya
-# @Last Modified time: 2022-01-27 12:38:47
+# @Last Modified time: 2022-01-28 09:10:23
 
 import sys
 import platform
@@ -104,13 +104,13 @@ class Immediate:
         if not contains_only(imm, '+-0123456789bBoOxXabcdefABCDEF'):
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
         self.imm = None
-        if re.fullmatch('^[-+]?[0-9]+$', imm) is not None:
+        if re.fullmatch(r'^[-+]?[0-9]+$', imm) is not None:
             imm = int(imm)
-        elif re.fullmatch('^[-+]?0[xX][0-9a-fA-F]+$', imm) is not None:
+        elif re.fullmatch(r'^[-+]?0[xX][0-9a-fA-F]+$', imm) is not None:
             imm = int(imm, 16)
-        elif re.fullmatch('^[-+]?0[oO][0-7]+$', imm) is not None:
+        elif re.fullmatch(r'^[-+]?0[oO][0-7]+$', imm) is not None:
             imm = int(imm, 8)
-        elif re.fullmatch('^[-+]?0[bB][0-1]+$', imm) is not None:
+        elif re.fullmatch(r'^[-+]?0[bB][0-1]+$', imm) is not None:
             imm = int(imm, 2)
         else:
             raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
@@ -233,7 +233,7 @@ class Label:
 
     @staticmethod
     def create(label, cnt):
-        if not label.isalnum():
+        if re.fullmatch(r'^[0-9a-zA-Z_]+$', label) is None:
             raise RISCvLabelError(
                 f'label name can contain only digits and letters: {label}')
         if label in Label.labels:
@@ -241,7 +241,7 @@ class Label:
         Label.labels[label] = cnt
 
     def __init__(self, label):
-        if not label.isalnum():
+        if re.fullmatch(r'^[0-9a-zA-Z_]+$', label) is None:
             raise RISCvLabelError(
                 f'label name can contain only digits and letters: {label}')
         self.label = label
@@ -452,7 +452,7 @@ class Instruction:
     @staticmethod
     def parse_offset(offset):
         split = offset.split('(')
-        if len(split) > 2:
+        if len(split) != 2:
             raise RISCvSyntaxError(f'invalid offset format: {offset}')
         imm_str, reg_str = split
         reg_str = reg_str[:-1]

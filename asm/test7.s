@@ -15,7 +15,11 @@ csrrw	a0		mcause	a1		# 0x18 # 7
 la		a0		handler			# 0x1c # 8
 								# 0x20 # 9
 csrrw	zero	mtvec	a0		# 0x24 # 10
-ebreak							# 0x28 # 11
+# ebreak							# 0x28 # 11
+li		a3		123
+sw		a3		0x84(zero)
+li		a3		0
+lw		a3		0x84(zero)
 j		end						# 0x2c # 12 (17)
 
 
@@ -25,12 +29,12 @@ handler:
 	addi	a0		a0		4	# 0x38 # 15 (14)
 	csrw	mepc	a0			# 0x3c # 16 (15)
 	csrr	a0		mcause		
-	li		a1		1
+	li		a1		2
 	beq		a0		a1	kb_handler
 	mret						# 0x40 # 17 (16)
 
 kb_handler:
-	lw		s0	0x80
+	lw		s0	0x80(zero)
 	mret
 
 end:
