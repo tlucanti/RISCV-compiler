@@ -1,10 +1,11 @@
 # RISCV-compiler
-compiler for RISC-V assembly language
+compiler for RISC-V assembly language \
+compiling in R32I extension, more info in offical [specification][SPEC]
 
 ## Compiler Usage
 
 You need any python version above 3.6
-### to compile write command
+### to compile type command
 ```bash
 python3 compiler.py file1.s file2.s [...]
 ```
@@ -63,12 +64,33 @@ it will create compiled binary files `file1.bin`, `file2.s`, ...
 
 # Disassembly
 
+You need any python version above 3.6
+### to dissassembly single command type
 ```bash
 python3 disassembly.py 0x12412
 ````
+it will print information about single instruction in hex
 
 # Test Assembly
 
+You need any python version above 3.10
+### to compile type command
 ```bash
 python3 asm.py file1.s file2.s [...]
 ````
+it will compile assembly code to binary files `file1.bin`, `file2.s`, ... by following rules:
+|B |C |WE| WS  | ALU | RA1 | RA2 | WA |CONST|
+|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+|31|30|29|28:27|26:23|22:18|17:13|12:8| 7:0 |
+- B: unconditional jump flag
+- C: conditional jump flag
+- WE: reg file write enable
+- WS: write source data (0 - const, 1 - switches, 2 - alu)
+- ALU: alu operation
+- RA1: first alu operand register address
+- RA2: second alu operand register address
+- WA: write address of register
+- CONST: constant
+
+
+[SPEC]: https://raw.githubusercontent.com/tlucanti/RISCV-compiler/master/riscv-spec.pdf
