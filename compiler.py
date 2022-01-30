@@ -9,6 +9,7 @@ import platform
 import re
 
 error_index = 0
+line_start = 0
 
 
 class Color:
@@ -56,7 +57,7 @@ def twos_complement(n, bits=32):
 class RISCvSyntaxError(SyntaxError):
     def __init__(self, what):
         super().__init__(what)
-        self.name = 'Syntax error'
+        self.name = '[y]Syntax error[]'
         self.what = what
         self.index = error_index
 
@@ -64,19 +65,19 @@ class RISCvSyntaxError(SyntaxError):
 class RISCvImmediateError(RISCvSyntaxError):
     def __init__(self, what):
         super().__init__(what)
-        self.name = 'Immediate value error'
+        self.name = '[y]Immediate value error[]'
 
 
 class RISCvRegisterError(RISCvSyntaxError):
     def __init__(self, what):
         super().__init__(what)
-        self.name = 'Register name error'
+        self.name = '[y]Register name error[]'
 
 
 class RISCvLabelError(RISCvSyntaxError):
     def __init__(self, what):
         super().__init__(what)
-        self.name = 'Invalid label name'
+        self.name = '[y]Invalid label name[]'
 
 
 # ------------------------------ SUPPORT CLASSES -------------------------------
@@ -102,7 +103,7 @@ class Immediate:
     def __init__(self, imm, imm_type):
         imm = str(imm)
         if not contains_only(imm, '+-0123456789bBoOxXabcdefABCDEF'):
-            raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
+            raise RISCvSyntaxError(f'[w]invalid immediate literal: [c]`{imm}`[]')
         self.imm = None
         if re.fullmatch(r'^[-+]?[0-9]+$', imm) is not None:
             imm = int(imm)
@@ -113,7 +114,7 @@ class Immediate:
         elif re.fullmatch(r'^[-+]?0[bB][0-1]+$', imm) is not None:
             imm = int(imm, 2)
         else:
-            raise RISCvSyntaxError(f'invalid immediate literal: {imm}')
+            raise RISCvSyntaxError(f'[w]invalid immediate literal: [c]`{imm}`[]')
 
         if imm_type in 'IS':
             rng = range(-2048, 2048)
@@ -139,12 +140,12 @@ class Immediate:
                 rng = range(0, 4294967296)
         else:
             raise SystemError(
-                f'[internal error]: Immediate::__init__ (invalid immediate type: {imm_type})')
+                f'[r][internal error]: Immediate::__init__ (invalid immediate type: {imm_type})[]')
 
         self.imm_int = imm
         if imm not in rng:
             raise RISCvImmediateError(
-                f'immediate of type {imm_type} is out of range {str(rng)[5:]}')
+                f'[r]immediate of type {imm_type} is out of range {str(rng)[5:]}[]')
 
     def __bytes__(self):
         return self.imm_bin
@@ -195,7 +196,7 @@ class Register:
         't5': 30, 'x30': 30,
         't6': 31, 'x31': 31,
     }
-    message = 'register {reg} is not recognized'
+    message = '[w]register [c]`{reg}`[w] is not recognized[]'
 
     def __init__(self, reg):
         if reg not in self.reg_map:
@@ -219,7 +220,7 @@ class CsrRegister(Register):
         'mepc': 0x341,
         'mcause': 0x342
     }
-    message = 'csr register {reg} is not recognized'
+    message = '[w]csr register [c]`{reg}`[w] is not recognized[]'
 
     def __init__(self, reg):
         super().__init__(reg)
@@ -235,20 +236,23 @@ class Label:
     def create(label, cnt):
         if re.fullmatch(r'^[0-9a-zA-Z_]+$', label) is None:
             raise RISCvLabelError(
-                f'label name can contain only digits and letters: {label}')
+                f'[w]label name can contain only digits and letters: [c]`{label}`[]')
         if label in Label.labels:
-            raise RISCvLabelError(f'label {label} redefined')
+            raise RISCvLabelError(f'[w]label [c]`{label}`[w] redefined[]')
         Label.labels[label] = cnt
 
     def __init__(self, label):
         if re.fullmatch(r'^[0-9a-zA-Z_]+$', label) is None:
             raise RISCvLabelError(
-                f'label name can contain only digits and letters: {label}')
+                f'[w]label name can contain only digits and letters: [c]`{label}`[]')
         self.label = label
 
-    def to_immediate(self, imm_type, cnt):
+    def to_immediate(self, imm_type, cnt, label_index):
+        global error_index
+
+        error_index = label_index
         if self.label not in self.labels:
-            raise RISCvLabelError(f'label {self.label} is not defined')
+            raise RISCvLabelError(f'[w]label [c]`{self.label}`[w] is not defined[]')
         imm = self.labels[self.label] - cnt
         if imm_type == 'la':
             imm += 1
@@ -335,32 +339,33 @@ class Instruction:
         self.reg = None
         self.instr_cnt = None
         self.line = None
+        self.label_index = None
 
     def __repr__(self):
         return self.line
 
     def parse(self, line, instr_cnt):
-        global error_index
+        global error_index, line_start
 
         self.line = line
         self.instr_cnt = instr_cnt
         split = line.split()
-        error_index = -1
+        error_index = 0
+        line_start = 0
         while len(split) > 0 and split[0].endswith(':'):
-            error_index += 1
             Label.create(split[0][:-1], instr_cnt)
+            error_index += 1
             del split[0]
         if len(split) == 0:
             return []
 
-        _error_index = error_index
-        error_index -= 1
+        line_start = error_index
         for label in split:
-            error_index += 1
             if label.endswith(':'):
                 raise RISCvLabelError(
-                    f'label {label} in the middle of the instruction')
-        error_index = _error_index
+                    f'[w]label [c]`{label[:-1]}`[w] in the middle of the instruction[]')
+            error_index += 1
+        error_index = line_start
 
         op = split[0].lower()
         if op in self.R_inst:
@@ -379,32 +384,33 @@ class Instruction:
             instr = self.pseudo_type(split)
         else:
             raise RISCvSyntaxError(
-                '{YELLOW}illegal instruction {CYAN}`' + op[0] + '`{RESET}')
+                f'[w]illegal instruction [c]`{op[0]}`[]')
         return instr
 
     def check_args(self, line, fmt):
-        global error_index
+        global error_index, line_start
 
         line = line[1:]
         for i in range(len(fmt)):
-            error_index = i
+            error_index = line_start + i + 1
             if i >= len(line):
                 if fmt[i] == 'imm':
-                    raise RISCvSyntaxError('expected immediate value')
+                    raise RISCvSyntaxError('[w]expected immediate value[]')
                 elif fmt[i] == 'reg':
-                    raise RISCvSyntaxError('expected register')
+                    raise RISCvSyntaxError('[w]expected register[]')
                 elif fmt[i] == 'label':
-                    raise RISCvSyntaxError('expected label')
+                    raise RISCvSyntaxError('[w]expected label[]')
                 elif fmt[i] == 'offset':
-                    raise RISCvSyntaxError('expected offset value')
+                    raise RISCvSyntaxError('[w]expected offset value[]')
                 else:
                     raise SystemError(
-                        f'[internal error]: compiler::Instruction::check_args (invalid format checker value {fmt[i]})')
+                        f'[r][internal error]: compiler::Instruction::check_args (invalid format checker value {fmt[i]})[]')
             elif fmt[i] == 'imm':
                 _ = Immediate(line[i], 'any')
             elif fmt[i] == 'reg':
                 _ = Register(line[i])
             elif fmt[i] == 'label':
+                self.label_index = error_index
                 _ = Label(line[i])
             elif fmt[i] == 'offset':
                 _ = self.parse_offset(line[i])
@@ -412,9 +418,10 @@ class Instruction:
                 _ = CsrRegister(line[i])
             else:
                 raise SystemError(
-                    f'[internal error]: compiler::Instruction::check_args (invalid format checker value {fmt[i]})')
+                    f'[r][internal error]: compiler::Instruction::check_args (invalid format checker value {fmt[i]})[]')
 
     def compile(self, instr_cnt):
+        global error_index, line_start
 
         imm = self.imm
         funct7 = self.funct7
@@ -427,7 +434,8 @@ class Instruction:
         reg = self.reg
 
         if self.type == 'la':
-            imm = label.to_immediate('la', instr_cnt)
+            error_index = line_start + 2
+            imm = label.to_immediate('la', instr_cnt, self.label_index)
             self.type = 'I'
 
         if self.type == 'R':
@@ -437,15 +445,17 @@ class Instruction:
         elif self.type == 'S':
             instr_bin = f'{imm[11:5]}{rs2}{rs1}{funct3}{imm[4:0]}{opcode}'
         elif self.type == 'B':
-            imm = label.to_immediate('B', instr_cnt)
+            error_index = line_start + 3
+            imm = label.to_immediate('B', instr_cnt, self.label_index)
             instr_bin = f'{imm[11]}{imm[9:4]}{rs2}{rs1}{funct3}{imm[3:0]}{imm[10]}{opcode}'
         elif self.type == 'U':
             instr_bin = f'{imm}{reg}{opcode}'
         elif self.type == 'J':
-            imm = label.to_immediate('J', instr_cnt)
+            error_index = line_start + 2
+            imm = label.to_immediate('J', instr_cnt, self.label_index)
             instr_bin = f'{imm[19]}{imm[9:0]}{imm[10]}{imm[18:11]}{reg}{opcode}'
         else:
-            raise SystemError(f'[internal error]: compiler::Instruction::compile (invalid isntruction type {self.type})')
+            raise SystemError(f'[r][internal error]: compiler::Instruction::compile (invalid isntruction type {self.type})[]')
 
         return instr_bin
 
@@ -453,7 +463,7 @@ class Instruction:
     def parse_offset(offset):
         split = offset.split('(')
         if len(split) != 2:
-            raise RISCvSyntaxError(f'invalid offset format: {offset}')
+            raise RISCvSyntaxError(f'[w]invalid offset format: [c]`{offset}`[]')
         imm_str, reg_str = split
         reg_str = reg_str[:-1]
         _ = Immediate(imm_str, 'any')
@@ -528,7 +538,7 @@ class Instruction:
             elif self.op == 'ebreak':
                 self.imm = Immediate(1, 'I')
             else:
-                raise SyntaxError(f'[internal error] compiler::Instruction::i_type (invalid system instruction {self.op})')
+                raise SyntaxError(f'[r][internal error] compiler::Instruction::i_type (invalid system instruction {self.op})[]')
             self.rs1 = Register('x0')
             self.rd = Register('x0')
         elif self.op in {'csrrw', 'csrrs', 'csrrc'}:
@@ -659,10 +669,17 @@ class Instruction:
             return lui + addi
         elif op == 'j':
             self.check_args(line, ('label',))
-            return Instruction().parse(f'jal x0 {line[1]}', self.instr_cnt)
+            instr = Instruction().parse(f'jal x0 {line[1]}', self.instr_cnt)
+            for i in instr:
+                i.line = ' '.join(line)
+                i.label_index = 1
+            return instr
         elif op == 'la':
 
             auipc = Instruction().parse(f'auipc {line[1]} 0', self.instr_cnt)
+            for i in auipc:
+                i.line = ' '.join(line)
+                i.label_index = 2
             self.instr_cnt += 1
             op_ht = {
                 'la': OpHt(funct3=0b000, opcode=0b0010011),
@@ -686,15 +703,41 @@ class Instruction:
             self.check_args(line, ('csr', 'reg'))
             return Instruction().parse(f'csrrw zero {line[1]} {line[2]}', self.instr_cnt)
         else:
-            raise SystemError(f'[internal error] compiler::Instruction::pseudo_type (invalid pseudo instruction {op})')
+            raise SystemError(f'[r][internal error] compiler::Instruction::pseudo_type (invalid pseudo instruction {op})[]')
+
+
+def draw_arrow(line):
+    line = line.split()
+    space = 0
+    for i in range(min(error_index, len(line))):
+        space += len(line[i])
+    space += error_index * 4
+    if error_index >= len(line):
+        arrow = '^~'
+    elif len(line[error_index]) == 1:
+        arrow = '^'
+    else:
+        arrow = '^' + (len(line[error_index]) - 2) * '~' + '^'
+    return space * ' ' + arrow, space
+
+
+def print_error(line, fname, line_num, exc):
+    arrow, idx = draw_arrow(line)
+    printc(f'[p]{fname}:{line_num}:{idx} [r]error: {exc.name}[]')
+    printc(exc.what)
+    printc('[w]{ln:>5} | {line}'.format(ln=line_num, line='    '.join(line.split())))
+    printc('[w]      | [r]{arrow}'.format(arrow=arrow))
 
 
 def compile_file(file):
     instructions = []
     line_num = 0
+    true_line_num = 0
     Label.labels = dict()
+    ok = True
     while True:
         line = file.readline()
+        true_line_num += 1
         if line == '':
             break
         if '#' in line:
@@ -703,37 +746,64 @@ def compile_file(file):
         line = line.replace(',', '')
         line = line.strip('\n')
         line = line.strip()
-        parsed = Instruction().parse(line, line_num)
+        try:
+            parsed = Instruction().parse(line, line_num)
+        except RISCvSyntaxError as exc:
+            print_error(line, file.name, true_line_num, exc)
+            ok = False
         instructions += parsed
         line_num += len(parsed)
     for i in range(len(instructions)):
-        instructions[i] = instructions[i].compile(i)
-        inst = instructions[i]
-        if len(inst) != 32:
-            raise SystemError("[internal error] compiler::compile_file (instruction length not equal 32)")
-    instructions = ['{:08x}'.format(int(instr, 2)) for instr in instructions]
-    return instructions
+        try:
+            instructions[i] = instructions[i].compile(i)
+            inst = instructions[i]
+        except RISCvSyntaxError as exc:
+            print_error(instructions[i].line, file.name, true_line_num, exc)
+            ok = False
+            inst = None
+        if inst is not None and len(inst) != 32:
+            raise SystemError("[r][internal error] compiler::compile_file (instruction length not equal 32)[]")
+    if ok:
+        instructions = ['{:08x}'.format(int(instr, 2)) for instr in instructions]
+        return instructions
+    else:
+        return None
+
+
+def printc(st):
+    st = st.replace('[k]', Color.BLACK)
+    st = st.replace('[r]', Color.RED)
+    st = st.replace('[g]', Color.GREEN)
+    st = st.replace('[y]', Color.YELLOW)
+    st = st.replace('[b]', Color.BLUE)
+    st = st.replace('[p]', Color.PURPLE)
+    st = st.replace('[c]', Color.CYAN)
+    st = st.replace('[w]', Color.WHITE)
+    st = st.replace('[]', Color.RESET)
+    st += Color.RESET
+    print(st)
 
 
 def main():
     if len(sys.argv) == 1:
-        print('no input files')
+        printc(f'[w]no input files')
         return
     for file in sys.argv[1:]:
         if not file.endswith('.s'):
             if '.' in file:
-                print(f'unsupported file format: .{file.split(".")[-1]}')
+                printc(f'[r]error: [w]unsupported file format: [y].{file.split(".")[-1]}')
             else:
-                print(f'unsupported file format: {file}')
+                printc(f'[r]error: [w]unsupported file format: [y]{file}')
             continue
         try:
             with open(file, 'r') as f:
-                print(f'started compiling {file}')
                 instr = compile_file(f)
+                if instr is None:
+                    return
         except FileNotFoundError:
-            print(f'cannot open {f.name}')
+            printc(f'[r]error: [w]cannot open [y]{f.name}')
         else:
-            print('compilation successful')
+            printc(f'[w]{f.name}: [g]compilation successful')
             with open(file[:-2] + '.bin', 'w') as outf:
                 outf.write('\n'.join(instr))
 
