@@ -4,12 +4,13 @@ compiling in R32I extension, more info in offical [specification][SPEC]
 
 ## Compiler Usage
 
-You need any python version above 3.6
+You need any python version above 3.6 \
+ckeck .s files in `asm` folder as examples of syntax possibilities
 ### to compile type command
 ```bash
 python3 compiler.py file1.s file2.s [...]
 ```
-it will create compiled binary files `file1.bin`, `file2.s`, ...
+it will create compiled binary files `file1.bin`, `file2.bin`, ...
 ### Supported instructions
 | Instr	| Syntax			| Type  | Explain					| Comment								|
 | ----- | -----------------	|:-----:| ------------------------- | --------------------------------- 	|
@@ -78,7 +79,7 @@ You need any python version above 3.10
 ```bash
 python3 asm.py file1.s file2.s [...]
 ````
-it will compile assembly code to binary files `file1.bin`, `file2.s`, ... by following rules:
+it will compile assembly code to binary files `file1.bin`, `file2.bin`, ... by following rules:
 |B |C |WE| WS  | ALU | RA1 | RA2 | WA |CONST|
 |:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
 |31|30|29|28:27|26:23|22:18|17:13|12:8| 7:0 |
